@@ -9,7 +9,7 @@ import Input from "@/components/ui/Input"
 import { Save } from "lucide-react"
 
 export default function ConfiguracionView() {
-  const [nombre, setNombre] = useState("Panadería San Martín")
+  const [nombre, setNombre] = useState("Panadería Rincon")
   const [moneda, setMoneda] = useState("ARS")
   const [alertas, setAlertas] = useState(true)
   const [mermaMax, setMermaMax] = useState("0.06")
