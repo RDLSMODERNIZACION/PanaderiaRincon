@@ -1,0 +1,48 @@
+from fastapi import APIRouter, Depends, Query
+
+from app.core.security import require_api_key
+from app.repositories.crud import TableConfig, delete_row, get_row, insert_row, list_rows, patch_row
+from app.routes.common import ok, raise_not_found
+
+NOMBRE_TABLA = TableConfig(
+    table="nombre_tabla",
+    id_prefix="nt",
+    allowed_create=("id", "nombre", "activo", "metadata"),
+    allowed_patch=("nombre", "activo", "metadata"),
+    soft_delete_column="activo",
+)
+
+router = APIRouter(prefix="/api/nombre-tabla", tags=["nombre-tabla"])
+
+
+@router.get("")
+def listar(limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0)):
+    return ok(list_rows(NOMBRE_TABLA, limit=limit, offset=offset))
+
+
+@router.get("/{row_id}")
+def obtener(row_id: str):
+    row = get_row(NOMBRE_TABLA, row_id)
+    if not row:
+        raise_not_found("Registro")
+    return ok(row)
+
+
+@router.post("", dependencies=[Depends(require_api_key)])
+def crear(payload: dict):
+    return ok(insert_row(NOMBRE_TABLA, payload))
+
+
+@router.patch("/{row_id}", dependencies=[Depends(require_api_key)])
+def actualizar(row_id: str, payload: dict):
+    row = patch_row(NOMBRE_TABLA, row_id, payload)
+    if not row:
+        raise_not_found("Registro")
+    return ok(row)
+
+
+@router.delete("/{row_id}", dependencies=[Depends(require_api_key)])
+def eliminar(row_id: str):
+    if not delete_row(NOMBRE_TABLA, row_id):
+        raise_not_found("Registro")
+    return ok(message="Registro eliminado")
