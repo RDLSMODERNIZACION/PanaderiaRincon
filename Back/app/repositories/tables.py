@@ -14,6 +14,45 @@ PRODUCTS = TableConfig(
     default_desc=False,
 )
 
+PRODUCT_DISCOUNT_RULES = TableConfig(
+    table="product_discount_rules",
+    id_prefix="disc",
+    label="Descuentos por producto",
+    allowed_create=(
+        "id",
+        "product_id",
+        "customer_id",
+        "nombre",
+        "tipo",
+        "min_cantidad",
+        "pack_cantidad",
+        "pack_precio",
+        "precio_unitario",
+        "fecha_desde",
+        "fecha_hasta",
+        "activo",
+        "prioridad",
+    ),
+    allowed_patch=(
+        "product_id",
+        "customer_id",
+        "nombre",
+        "tipo",
+        "min_cantidad",
+        "pack_cantidad",
+        "pack_precio",
+        "precio_unitario",
+        "fecha_desde",
+        "fecha_hasta",
+        "activo",
+        "prioridad",
+    ),
+    soft_delete_column="activo",
+    search_columns=("id", "nombre", "product_id", "tipo"),
+    default_order_by="prioridad",
+    default_desc=False,
+)
+
 SUPPLIES = TableConfig(
     table="supplies",
     id_prefix="ins",
@@ -128,7 +167,6 @@ INTEGRATION_CONNECTIONS = TableConfig(
     search_columns=("id", "nombre", "tipo", "estado"),
 )
 
-# Seguridad / roles
 APP_ROLES = TableConfig(
     table="app_roles",
     id_prefix="role",
@@ -145,9 +183,9 @@ APP_PERMISSIONS = TableConfig(
     table="app_permissions",
     id_prefix="perm",
     label="Permisos",
-    allowed_create=("id", "clave", "descripcion", "modulo"),
-    allowed_patch=("clave", "descripcion", "modulo"),
-    search_columns=("clave", "descripcion", "modulo"),
+    allowed_create=("id", "clave", "nombre", "modulo"),
+    allowed_patch=("clave", "nombre", "modulo"),
+    search_columns=("clave", "nombre", "modulo"),
     default_order_by="clave",
     default_desc=False,
 )
@@ -164,15 +202,14 @@ APP_USERS = TableConfig(
     table="app_users",
     id_prefix="usr",
     label="Usuarios",
-    allowed_create=("id", "email", "nombre", "role_id", "employee_id", "status", "pin_hash", "last_login_at"),
-    allowed_patch=("email", "nombre", "role_id", "employee_id", "status", "pin_hash", "last_login_at"),
+    allowed_create=("id", "email", "nombre", "role_id", "employee_id", "status", "password_plain", "last_login_at"),
+    allowed_patch=("email", "nombre", "role_id", "employee_id", "status", "password_plain", "last_login_at"),
     soft_delete_column=None,
     search_columns=("id", "email", "nombre", "status"),
     default_order_by="nombre",
     default_desc=False,
 )
 
-# Reparto y control de rendición
 CUSTOMERS = TableConfig(
     table="customers",
     id_prefix="cli",
@@ -234,6 +271,8 @@ DELIVERY_RUN_STOCK = TableConfig(
     label="Stock del reparto",
     allowed_create=("id", "delivery_run_id", "product_id", "cantidad_cargada", "cantidad_devuelta_real", "cantidad_esperada", "diferencia"),
     allowed_patch=("delivery_run_id", "product_id", "cantidad_cargada", "cantidad_devuelta_real", "cantidad_esperada", "diferencia"),
+    default_order_by="created_at",
+    default_desc=True,
 )
 
 DELIVERY_VISITS = TableConfig(
@@ -258,17 +297,19 @@ PAYMENTS = TableConfig(
     table="payments",
     id_prefix="pay",
     label="Pagos",
-    allowed_create=("id", "visit_id", "customer_id", "delivery_run_id", "metodo", "estado", "amount", "referencia", "comprobante_url", "confirmed_at"),
-    allowed_patch=("visit_id", "customer_id", "delivery_run_id", "metodo", "estado", "amount", "referencia", "comprobante_url", "confirmed_at"),
+    allowed_create=("id", "visit_id", "customer_id", "delivery_run_id", "metodo", "estado", "amount", "referencia", "comprobante_url"),
+    allowed_patch=("visit_id", "customer_id", "delivery_run_id", "metodo", "estado", "amount", "referencia", "comprobante_url"),
     search_columns=("id", "metodo", "estado", "referencia"),
+    default_order_by="created_at",
+    default_desc=True,
 )
 
 CUSTOMER_ACCOUNT_MOVEMENTS = TableConfig(
     table="customer_account_movements",
     id_prefix="cta",
     label="Cuenta corriente clientes",
-    allowed_create=("id", "customer_id", "fecha", "tipo", "debe", "haber", "descripcion", "reference_type", "reference_id", "created_by"),
-    allowed_patch=("customer_id", "fecha", "tipo", "debe", "haber", "descripcion", "reference_type", "reference_id", "created_by"),
+    allowed_create=("id", "customer_id", "fecha", "tipo", "debe", "haber", "descripcion", "reference_type", "reference_id"),
+    allowed_patch=("customer_id", "fecha", "tipo", "debe", "haber", "descripcion", "reference_type", "reference_id"),
     search_columns=("id", "tipo", "descripcion", "reference_type", "reference_id"),
     default_order_by="fecha",
 )
@@ -277,8 +318,8 @@ BREADCRUMB_ACCOUNT_MOVEMENTS = TableConfig(
     table="breadcrumb_account_movements",
     id_prefix="panr",
     label="Pan viejo / pan rallado",
-    allowed_create=("id", "customer_id", "fecha", "visit_id", "tipo", "kg_entrada", "kg_salida", "observaciones", "created_by"),
-    allowed_patch=("customer_id", "fecha", "visit_id", "tipo", "kg_entrada", "kg_salida", "observaciones", "created_by"),
+    allowed_create=("id", "customer_id", "fecha", "visit_id", "tipo", "kg_entrada", "kg_salida", "observaciones"),
+    allowed_patch=("customer_id", "fecha", "visit_id", "tipo", "kg_entrada", "kg_salida", "observaciones"),
     search_columns=("id", "tipo", "observaciones"),
     default_order_by="fecha",
 )
@@ -331,6 +372,7 @@ TABLES: dict[str, TableConfig] = {
     cfg.table: cfg for cfg in [
         BUSINESS_SETTINGS,
         PRODUCTS,
+        PRODUCT_DISCOUNT_RULES,
         SUPPLIES,
         RECIPES,
         RECIPE_ITEMS,

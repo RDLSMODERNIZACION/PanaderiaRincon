@@ -81,6 +81,13 @@ function stepForProduct(item: RepartidorStock) {
   return 1
 }
 
+function money(value: number) {
+  return `$ ${Number(value || 0).toLocaleString("es-AR", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2
+  })}`
+}
+
 export default function VisitModal({
   open,
   runId,
@@ -93,8 +100,8 @@ export default function VisitModal({
   const [quantities, setQuantities] = useState<Record<string, string>>({})
   const [panViejoKg, setPanViejoKg] = useState("0")
   const [metodo, setMetodo] = useState("efectivo")
-  const [totalVenta, setTotalVenta] = useState("0")
   const [montoPagado, setMontoPagado] = useState("0")
+  const [showNotes, setShowNotes] = useState(false)
   const [observaciones, setObservaciones] = useState("")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -103,6 +110,7 @@ export default function VisitModal({
     if (!open) return
 
     const next: Record<string, string> = {}
+
     for (const item of stock) {
       next[productId(item)] = "0"
     }
@@ -110,8 +118,8 @@ export default function VisitModal({
     setQuantities(next)
     setPanViejoKg("0")
     setMetodo("efectivo")
-    setTotalVenta("0")
     setMontoPagado("0")
+    setShowNotes(false)
     setObservaciones("")
     setError(null)
   }, [open, stock])
@@ -121,18 +129,34 @@ export default function VisitModal({
       const id = productId(item)
       const cantidad = numberFromInput(quantities[id] || "0")
       const price = productPrice(item)
+
       if (!Number.isFinite(cantidad) || cantidad <= 0) return sum
       return sum + cantidad * price
     }, 0)
   }, [stock, quantities])
 
+  const hasDeliveredQuantity = useMemo(() => {
+    return stock.some(item => {
+      const id = productId(item)
+      const cantidad = numberFromInput(quantities[id] || "0")
+      return Number.isFinite(cantidad) && cantidad > 0
+    })
+  }, [stock, quantities])
+
+  const hasMissingPrices = useMemo(() => {
+    return stock.some(item => {
+      const id = productId(item)
+      const cantidad = numberFromInput(quantities[id] || "0")
+      return Number.isFinite(cantidad) && cantidad > 0 && productPrice(item) <= 0
+    })
+  }, [stock, quantities])
+
   const deuda = useMemo(() => {
-    const total = numberFromInput(totalVenta)
     const paid = numberFromInput(montoPagado)
 
-    if (!Number.isFinite(total) || !Number.isFinite(paid)) return 0
-    return Math.max(total - paid, 0)
-  }, [totalVenta, montoPagado])
+    if (!Number.isFinite(paid)) return 0
+    return Math.max(computedTotal - paid, 0)
+  }, [computedTotal, montoPagado])
 
   function setProductQuantity(id: string, value: string) {
     setQuantities(current => ({
@@ -159,14 +183,8 @@ export default function VisitModal({
   async function saveVisit() {
     if (!session || !runId || !customerId(customer)) return
 
-    const total = numberFromInput(totalVenta)
     const paid = numberFromInput(montoPagado)
     const panViejo = numberFromInput(panViejoKg)
-
-    if (!Number.isFinite(total) || total < 0) {
-      setError("Ingresá un total de venta válido.")
-      return
-    }
 
     if (!Number.isFinite(paid) || paid < 0) {
       setError("Ingresá un monto pagado válido.")
@@ -192,6 +210,17 @@ export default function VisitModal({
       })
       .filter(item => item.product_id && Number.isFinite(item.cantidad) && item.cantidad > 0)
 
+    for (const item of stock) {
+      const id = productId(item)
+      const cantidad = numberFromInput(quantities[id] || "0")
+      const restante = productRemaining(item)
+
+      if (Number.isFinite(cantidad) && cantidad > restante) {
+        setError(`No podés dejar más ${productName(item)} que lo disponible. Disponible: ${restante}.`)
+        return
+      }
+    }
+
     setSaving(true)
     setError(null)
 
@@ -203,7 +232,7 @@ export default function VisitModal({
           items,
           metodo,
           monto_pagado: paid,
-          total_venta: total,
+          total_venta: computedTotal,
           pan_viejo_kg: panViejo,
           observaciones: observaciones.trim() || undefined,
           gps_ok: false
@@ -228,8 +257,21 @@ export default function VisitModal({
         <div className="flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-2xl">
           <div className="flex items-start justify-between gap-4 border-b border-zinc-100 px-5 py-4">
             <div>
-              <div className="text-lg font-semibold text-zinc-900">{customer?.nombre || "Cliente"}</div>
-              {customer?.direccion ? <div className="mt-1 text-sm text-zinc-500">{customer.direccion}</div> : null}
+              <div className="text-xl font-semibold text-zinc-900">
+                {customer?.nombre || "Cliente"}
+              </div>
+
+              {customer?.direccion ? (
+                <div className="mt-1 text-sm text-zinc-500">
+                  {customer.direccion}
+                </div>
+              ) : null}
+
+              {customer?.telefono ? (
+                <div className="mt-1 text-xs text-zinc-500">
+                  {customer.telefono}
+                </div>
+              ) : null}
             </div>
 
             <button type="button" className="rounded-xl p-2 hover:bg-zinc-100" onClick={onClose}>
@@ -237,15 +279,17 @@ export default function VisitModal({
             </button>
           </div>
 
-          <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
+          <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
             <div className="rounded-2xl border border-zinc-200">
               <div className="border-b border-zinc-100 px-4 py-3">
-                <div className="text-sm font-semibold text-zinc-900">Mercadería dejada en el comercio</div>
-                <div className="text-xs text-zinc-500">Usá los botones grandes para cargar rápido desde tablet.</div>
+                <div className="text-base font-semibold text-zinc-900">Mercadería dejada</div>
+                <div className="text-xs text-zinc-500">Cargá solo lo que quedó en el comercio.</div>
               </div>
 
               {stock.length === 0 ? (
-                <div className="px-4 py-5 text-sm text-zinc-500">No hay mercadería asignada al reparto.</div>
+                <div className="px-4 py-5 text-sm text-zinc-500">
+                  No hay mercadería asignada al reparto.
+                </div>
               ) : (
                 <div className="divide-y divide-zinc-100">
                   {stock.map(item => {
@@ -254,11 +298,11 @@ export default function VisitModal({
                     const step = stepForProduct(item)
 
                     return (
-                      <div key={id} className="grid grid-cols-[1fr_auto] gap-3 px-4 py-3">
+                      <div key={id} className="grid grid-cols-[1fr_auto] gap-3 px-4 py-4">
                         <div className="min-w-0">
-                          <div className="font-semibold text-zinc-900">{productName(item)}</div>
+                          <div className="text-lg font-semibold text-zinc-900">{productName(item)}</div>
                           <div className="mt-1 text-xs text-zinc-500">
-                            Unidad: {productUnit(item) || "-"} · Restante: {productRemaining(item)}
+                            {productUnit(item) || "-"} · Disponible: {productRemaining(item)}
                           </div>
                         </div>
 
@@ -297,14 +341,12 @@ export default function VisitModal({
               )}
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-3 rounded-2xl border border-zinc-200 p-4">
-                <div>
-                  <div className="text-sm font-semibold text-zinc-900">Pan viejo recibido</div>
-                  <div className="text-xs text-zinc-500">Pan que el comercio devuelve o no vendió.</div>
-                </div>
+            <div className="grid gap-4 md:grid-cols-[0.9fr_1.1fr]">
+              <div className="rounded-2xl border border-zinc-200 p-4">
+                <div className="text-base font-semibold text-zinc-900">Pan viejo</div>
+                <div className="text-xs text-zinc-500">Pan que el comercio devuelve.</div>
 
-                <div className="flex items-center gap-2">
+                <div className="mt-4 flex items-center gap-2">
                   <button
                     type="button"
                     disabled={saving}
@@ -333,30 +375,25 @@ export default function VisitModal({
                   </button>
                 </div>
 
-                <div className="text-xs text-zinc-500">Se registra en kg.</div>
+                <div className="mt-2 text-xs text-zinc-500">Kg recibidos.</div>
               </div>
 
-              <div className="space-y-3 rounded-2xl border border-zinc-200 p-4">
-                <div>
-                  <div className="text-sm font-semibold text-zinc-900">Cobro</div>
-                  <div className="text-xs text-zinc-500">
-                    Total, método de pago, cuánto pagó y deuda generada.
-                  </div>
+              <div className="rounded-2xl border border-zinc-200 p-4">
+                <div className="text-base font-semibold text-zinc-900">Cobro</div>
+                <div className="text-xs text-zinc-500">El total se calcula por mercadería y precios.</div>
+
+                <div className="mt-4 rounded-2xl bg-zinc-50 px-4 py-3">
+                  <div className="text-xs text-zinc-500">Total venta calculado</div>
+                  <div className="text-2xl font-semibold text-zinc-900">{money(computedTotal)}</div>
+
+                  {hasDeliveredQuantity && hasMissingPrices ? (
+                    <div className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      Hay productos sin precio. El total puede quedar en $0 hasta cargar precios.
+                    </div>
+                  ) : null}
                 </div>
 
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="block">
-                    <span className="mb-1 block text-xs font-medium text-zinc-600">Total venta</span>
-                    <Input
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={totalVenta}
-                      onChange={e => setTotalVenta(e.target.value)}
-                      placeholder="0"
-                    />
-                  </label>
-
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <label className="block">
                     <span className="mb-1 block text-xs font-medium text-zinc-600">Pagó</span>
                     <Input
@@ -366,47 +403,47 @@ export default function VisitModal({
                       value={montoPagado}
                       onChange={e => setMontoPagado(e.target.value)}
                       placeholder="0"
+                      className="h-12 text-lg font-semibold"
                     />
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-zinc-600">Método</span>
+                    <Select value={metodo} onChange={e => setMetodo(e.target.value)} className="h-12">
+                      <option value="efectivo">Efectivo</option>
+                      <option value="transferencia">Transferencia</option>
+                      <option value="mercado_pago">Mercado Pago</option>
+                      <option value="qr">QR</option>
+                      <option value="otro">Otro</option>
+                    </Select>
                   </label>
                 </div>
 
-                {computedTotal > 0 ? (
-                  <button
-                    type="button"
-                    className="text-xs font-medium text-zinc-700 underline"
-                    onClick={() => setTotalVenta(String(Number(computedTotal.toFixed(2))))}
-                  >
-                    Usar total calculado por precios: ${computedTotal.toFixed(2)}
-                  </button>
-                ) : null}
-
-                <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-zinc-600">Método</span>
-                  <Select value={metodo} onChange={e => setMetodo(e.target.value)}>
-                    <option value="efectivo">Efectivo</option>
-                    <option value="transferencia">Transferencia</option>
-                    <option value="mercado_pago">Mercado Pago</option>
-                    <option value="qr">QR</option>
-                    <option value="otro">Otro</option>
-                  </Select>
-                </label>
-
-                <div className="rounded-2xl bg-zinc-50 px-4 py-3">
+                <div className="mt-4 rounded-2xl bg-zinc-50 px-4 py-3">
                   <div className="text-xs text-zinc-500">Queda debiendo</div>
-                  <div className="text-xl font-semibold text-zinc-900">${deuda.toFixed(2)}</div>
+                  <div className="text-2xl font-semibold text-zinc-900">{money(deuda)}</div>
                 </div>
               </div>
             </div>
 
-            <label className="block">
-              <span className="mb-1 block text-xs font-medium text-zinc-600">Observaciones</span>
-              <textarea
-                value={observaciones}
-                onChange={e => setObservaciones(e.target.value)}
-                className="min-h-[90px] w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-300"
-                placeholder="Comentarios del local, pago, entrega o devolución..."
-              />
-            </label>
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowNotes(value => !value)}
+                className="text-sm font-medium text-zinc-700 underline"
+              >
+                {showNotes ? "Ocultar observación" : "+ Agregar observación"}
+              </button>
+
+              {showNotes ? (
+                <textarea
+                  value={observaciones}
+                  onChange={e => setObservaciones(e.target.value)}
+                  className="mt-2 min-h-[90px] w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-300"
+                  placeholder="Comentario opcional..."
+                />
+              ) : null}
+            </div>
 
             {error ? (
               <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -421,7 +458,8 @@ export default function VisitModal({
             </Button>
 
             <Button type="button" onClick={saveVisit} disabled={saving}>
-              <Save className="mr-2 h-4 w-4" /> {saving ? "Guardando..." : "Guardar visita"}
+              <Save className="mr-2 h-4 w-4" />
+              {saving ? "Guardando..." : "Guardar visita"}
             </Button>
           </div>
         </div>

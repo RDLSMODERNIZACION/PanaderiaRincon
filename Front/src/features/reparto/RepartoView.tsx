@@ -1,20 +1,153 @@
-import ResourceTabs from "@/features/crud/ResourceTabs"
+"use client"
+
+import { useMemo, useState } from "react"
+import CrudTableView from "@/features/crud/CrudTableView"
+import StockOverviewView from "@/features/reparto/StockOverviewView"
+import VisitsOverviewView from "@/features/reparto/VisitsOverviewView"
+import PaymentsOverviewView from "@/features/reparto/PaymentsOverviewView"
+import ClosuresOverviewView from "@/features/reparto/ClosuresOverviewView"
+
+type TabKey =
+  | "delivery_runs"
+  | "delivery_routes"
+  | "delivery_run_stock"
+  | "delivery_visits"
+  | "payments"
+  | "delivery_run_closures"
+
+type TabItem = {
+  key: TabKey
+  label: string
+  title: string
+  subtitle: string
+}
+
+const mainTabs: TabItem[] = [
+  {
+    key: "delivery_runs",
+    label: "Repartos",
+    title: "Repartos",
+    subtitle: "Día, repartidor, recorrido, estado y mercadería asignada. Tocá una fila para cargar la mercadería del reparto."
+  },
+  {
+    key: "delivery_routes",
+    label: "Recorridos",
+    title: "Recorridos",
+    subtitle: "Recorridos habilitados. Tocá una fila para ver, agregar o quitar locales del recorrido."
+  }
+]
+
+const controlTabs: TabItem[] = [
+  {
+    key: "delivery_run_stock",
+    label: "Stock",
+    title: "Stock cargado",
+    subtitle: "Vista rápida de mercadería asignada a repartos."
+  },
+  {
+    key: "delivery_visits",
+    label: "Visitas",
+    title: "Visitas",
+    subtitle: "Vista rápida de visitas, ventas, cobros, deuda y pan viejo."
+  },
+  {
+    key: "payments",
+    label: "Pagos",
+    title: "Pagos",
+    subtitle: "Vista rápida de cobros por cliente, repartidor, método y estado."
+  },
+  {
+    key: "delivery_run_closures",
+    label: "Cierres",
+    title: "Cierres",
+    subtitle: "Resumen de cierre y rendición de cada reparto."
+  }
+]
+
+const allTabs = [...mainTabs, ...controlTabs]
+
+function TabButton({
+  active,
+  children,
+  onClick
+}: {
+  active: boolean
+  children: React.ReactNode
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={[
+        "rounded-2xl border px-5 py-3 text-sm font-semibold shadow-sm transition",
+        active
+          ? "border-zinc-900 bg-zinc-900 text-white"
+          : "border-zinc-200 bg-white text-zinc-900 hover:bg-zinc-50"
+      ].join(" ")}
+    >
+      {children}
+    </button>
+  )
+}
 
 export default function RepartoView() {
+  const [activeTab, setActiveTab] = useState<TabKey>("delivery_runs")
+
+  const active = useMemo(() => {
+    return allTabs.find(tab => tab.key === activeTab) || allTabs[0]
+  }, [activeTab])
+
   return (
-    <ResourceTabs
-      title="Reparto y rendición"
-      subtitle="Control de repartidores, stock cargado, visitas, ventas, pagos, devoluciones y cierres."
-      tabs={[
-        { table: "delivery_runs", label: "Repartos", description: "Día, repartidor, recorrido y estado del reparto." },
-        { table: "delivery_run_stock", label: "Stock", description: "Mercadería cargada, devuelta y diferencias por producto." },
-        { table: "delivery_visits", label: "Visitas", description: "Cada parada en comercio con GPS, bloqueo y observaciones." },
-        { table: "delivery_visit_items", label: "Mercadería", description: "Productos vendidos, bonificados, devueltos o ajustados en cada visita." },
-        { table: "payments", label: "Pagos", description: "Efectivo, transferencia, Mercado Pago, QR y pagos pendientes." },
-        { table: "delivery_run_closures", label: "Cierres", description: "Resumen final del repartidor y diferencias de efectivo/stock." },
-        { table: "delivery_routes", label: "Recorridos", description: "Recorridos habilitados." },
-        { table: "delivery_route_customers", label: "Locales por recorrido", description: "Orden de visita de cada comercio." }
-      ]}
-    />
+    <div className="space-y-5">
+      <div className="flex flex-col gap-4 border-b border-zinc-200 pb-5 xl:flex-row xl:items-end xl:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
+            Reparto y rendición
+          </h1>
+          <p className="mt-1 text-sm text-zinc-600">
+            Control de repartidores, mercadería cargada, visitas, pagos, devoluciones y cierres.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between xl:min-w-[720px]">
+          <div className="flex flex-wrap gap-2">
+            {mainTabs.map(tab => (
+              <TabButton key={tab.key} active={activeTab === tab.key} onClick={() => setActiveTab(tab.key)}>
+                {tab.label}
+              </TabButton>
+            ))}
+          </div>
+
+          <div className="hidden h-8 w-px bg-zinc-200 lg:block" />
+
+          <div className="flex flex-wrap gap-2">
+            {controlTabs.map(tab => (
+              <TabButton key={tab.key} active={activeTab === tab.key} onClick={() => setActiveTab(tab.key)}>
+                {tab.label}
+              </TabButton>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {active.key === "delivery_run_stock" ? (
+        <StockOverviewView />
+      ) : active.key === "delivery_visits" ? (
+        <VisitsOverviewView />
+      ) : active.key === "payments" ? (
+        <PaymentsOverviewView />
+      ) : active.key === "delivery_run_closures" ? (
+        <ClosuresOverviewView />
+      ) : (
+        <CrudTableView
+          key={active.key}
+          tableName={active.key}
+          title={active.title}
+          subtitle={active.subtitle}
+          embedded
+        />
+      )}
+    </div>
   )
 }

@@ -5,52 +5,75 @@ import Image from "next/image"
 import { usePathname } from "next/navigation"
 import {
   BarChart3,
-  Boxes,
+  Car,
   Coffee,
-  Database,
+  Flame,
   Home,
-  PackageOpen,
   Route,
-  Settings,
   Shield,
   ShoppingCart,
   Truck,
   Users,
-  WalletCards,
-  Wheat
+  WalletCards
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/features/auth/AuthProvider"
 
-const nav = [
-  { href: "/", label: "Dashboard", icon: Home, perms: ["admin.menu"] },
-
-  { href: "/mi-reparto", label: "Mi reparto", icon: Truck, perms: ["delivery.self"] },
-
-  { href: "/reparto", label: "Reparto", icon: Route, perms: ["delivery.admin"] },
-
-  { href: "/cuentas", label: "Cuentas", icon: WalletCards, perms: ["admin.menu"] },
-  { href: "/clientes", label: "Clientes", icon: Users, perms: ["admin.menu"] },
-  { href: "/pan-rallado", label: "Pan rallado", icon: Wheat, perms: ["admin.menu"] },
-
-  { href: "/ventas", label: "Ventas", icon: ShoppingCart, perms: ["admin.menu"] },
-  { href: "/productos", label: "Productos", icon: Coffee, perms: ["admin.menu"] },
-  { href: "/insumos", label: "Insumos", icon: PackageOpen, perms: ["admin.menu"] },
-  { href: "/inventario", label: "Inventario", icon: Boxes, perms: ["admin.menu"] },
-  { href: "/produccion", label: "Producción", icon: Database, perms: ["admin.menu"] },
-  { href: "/personal", label: "Personal", icon: Users, perms: ["admin.menu"] },
-
-  { href: "/reportes", label: "Reportes", icon: BarChart3, perms: ["admin.menu"] },
-  { href: "/seguridad", label: "Seguridad", icon: Shield, perms: ["admin.menu"] },
-  { href: "/admin", label: "CRUD completo", icon: Database, perms: ["admin.menu"] },
-  { href: "/configuracion", label: "Configuración", icon: Settings, perms: ["admin.menu"] }
+const navGroups = [
+  {
+    title: "",
+    items: [
+      { href: "/", label: "Dashboard", icon: Home, perms: ["admin.menu"] }
+    ]
+  },
+  {
+    title: "Reparto",
+    items: [
+      { href: "/mi-reparto", label: "Mi reparto", icon: Truck, perms: ["delivery.self"] },
+      { href: "/reparto", label: "Reparto", icon: Route, perms: ["delivery.admin"] }
+    ]
+  },
+  {
+    title: "Administración",
+    items: [
+      { href: "/cuentas", label: "Cuentas", icon: WalletCards, perms: ["admin.menu"] },
+      { href: "/clientes", label: "Clientes", icon: Users, perms: ["admin.menu"] },
+      { href: "/ventas", label: "Ventas", icon: ShoppingCart, perms: ["admin.menu"] },
+      { href: "/productos", label: "Productos", icon: Coffee, perms: ["admin.menu"] },
+      { href: "/personal", label: "Personal", icon: Users, perms: ["admin.menu"] }
+    ]
+  },
+  {
+    title: "Maquinaria",
+    items: [
+      { href: "/vehiculos", label: "Vehículos", icon: Car, perms: ["admin.menu"] },
+      { href: "/hornos", label: "Hornos", icon: Flame, perms: ["admin.menu"] }
+    ]
+  },
+  {
+    title: "KPI",
+    items: [
+      { href: "/reportes", label: "Reportes", icon: BarChart3, perms: ["admin.menu"] }
+    ]
+  },
+  {
+    title: "Sistema",
+    items: [
+      { href: "/seguridad", label: "Seguridad", icon: Shield, perms: ["admin.menu"] }
+    ]
+  }
 ]
 
 export default function Sidebar() {
   const pathname = usePathname()
   const { can } = useAuth()
 
-  const visible = nav.filter(item => item.perms.length === 0 || can(...item.perms))
+  const groups = navGroups
+    .map(group => ({
+      ...group,
+      items: group.items.filter(item => item.perms.length === 0 || can(...item.perms))
+    }))
+    .filter(group => group.items.length > 0)
 
   return (
     <aside className="sticky top-0 hidden h-screen w-[292px] shrink-0 overflow-y-auto border-r border-zinc-200 bg-white px-4 py-5 md:block">
@@ -72,25 +95,37 @@ export default function Sidebar() {
         </div>
       </div>
 
-      <nav className="mt-6 space-y-1">
-        {visible.map(item => {
-          const active = pathname === item.href || (item.href !== "/" && pathname?.startsWith(item.href))
-          const Icon = item.icon
+      <nav className="mt-6 space-y-6">
+        {groups.map(group => (
+          <div key={group.title || "inicio"}>
+            {group.title ? (
+              <div className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+                {group.title}
+              </div>
+            ) : null}
 
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                "flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition-colors",
-                active ? "bg-zinc-900 text-white" : "text-zinc-700 hover:bg-zinc-100"
-              )}
-            >
-              <Icon className="h-4 w-4" />
-              <span>{item.label}</span>
-            </Link>
-          )
-        })}
+            <div className="space-y-1">
+              {group.items.map(item => {
+                const active = pathname === item.href || (item.href !== "/" && pathname?.startsWith(item.href))
+                const Icon = item.icon
+
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={cn(
+                      "flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition-colors",
+                      active ? "bg-zinc-900 text-white" : "text-zinc-700 hover:bg-zinc-100"
+                    )}
+                  >
+                    <Icon className="h-4 w-4" />
+                    <span>{item.label}</span>
+                  </Link>
+                )
+              })}
+            </div>
+          </div>
+        ))}
       </nav>
 
       <div className="mt-6 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">

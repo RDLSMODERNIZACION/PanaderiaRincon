@@ -155,7 +155,7 @@ def _run_row_for_user(run_id: str | None, auth: AuthContext) -> dict[str, Any]:
     return row
 
 
-def _product_price(product_id: str, customer_id: str) -> float:
+def _base_product_price(product_id: str, customer_id: str) -> float:
     row = fetch_one(
         """
         select precio
@@ -196,6 +196,76 @@ def _product_price(product_id: str, customer_id: str) -> float:
             return 0
 
     return 0
+
+
+def _product_pricing(product_id: str, customer_id: str, cantidad: float) -> dict[str, Any]:
+    cantidad = float(cantidad or 0)
+    base_price = _base_product_price(product_id, customer_id)
+
+    if cantidad <= 0:
+        return {
+            "precio_unitario": base_price,
+            "subtotal": 0.0,
+            "discount_rule_id": None,
+            "discount_name": None,
+        }
+
+    base_subtotal = cantidad * base_price
+
+    rules = fetch_all(
+        """
+        select *
+        from public.product_discount_rules
+        where product_id = %s
+          and activo = true
+          and (customer_id = %s or customer_id is null)
+          and fecha_desde <= current_date
+          and (fecha_hasta is null or fecha_hasta >= current_date)
+        order by
+          case when customer_id = %s then 0 else 1 end,
+          prioridad asc,
+          created_at asc
+        """,
+        [product_id, customer_id, customer_id],
+    )
+
+    best_subtotal = base_subtotal
+    best_rule_id = None
+    best_rule_name = None
+
+    for rule in rules:
+        tipo = rule.get("tipo")
+        candidate = None
+
+        if tipo == "pack":
+            pack_qty = float(rule.get("pack_cantidad") or 0)
+            pack_price = float(rule.get("pack_precio") or 0)
+
+            if pack_qty > 0 and pack_price > 0:
+                packs = int(cantidad // pack_qty)
+                remainder = cantidad - (packs * pack_qty)
+                candidate = (packs * pack_price) + (remainder * base_price)
+
+        elif tipo == "precio_por_cantidad":
+            min_qty = float(rule.get("min_cantidad") or 0)
+            unit_price = float(rule.get("precio_unitario") or 0)
+
+            if cantidad >= min_qty and unit_price > 0:
+                candidate = cantidad * unit_price
+
+        if candidate is not None and candidate < best_subtotal:
+            best_subtotal = candidate
+            best_rule_id = rule.get("id")
+            best_rule_name = rule.get("nombre")
+
+    effective_unit = best_subtotal / cantidad if cantidad > 0 else base_price
+
+    return {
+        "precio_unitario": effective_unit,
+        "subtotal": best_subtotal,
+        "discount_rule_id": best_rule_id,
+        "discount_name": best_rule_name,
+    }
 
 
 def _payment_method_for_db(method: str) -> str:
@@ -567,13 +637,10 @@ def guardar_visita(
         if tipo not in {"venta", "devolucion", "bonificacion", "ajuste"}:
             tipo = "venta"
 
-        precio_unitario = item.precio_unitario
+        pricing = _product_pricing(item.product_id, customer_id, cantidad)
 
-        if precio_unitario is None:
-            precio_unitario = _product_price(item.product_id, customer_id)
-
-        precio_unitario = float(precio_unitario or 0)
-        subtotal = cantidad * precio_unitario
+        precio_unitario = float(pricing["precio_unitario"] or 0)
+        subtotal = float(pricing["subtotal"] or 0)
 
         if tipo == "venta":
             computed_total += subtotal
@@ -585,10 +652,12 @@ def guardar_visita(
                 "cantidad": cantidad,
                 "precio_unitario": precio_unitario,
                 "subtotal": subtotal,
+                "discount_rule_id": pricing.get("discount_rule_id"),
+                "discount_name": pricing.get("discount_name"),
             }
         )
 
-    total_venta = float(payload.total_venta) if payload.total_venta is not None else computed_total
+    total_venta = computed_total
     deuda = max(total_venta - payment_amount, 0)
 
     existing_visit = fetch_one(
@@ -803,6 +872,7 @@ def guardar_visita(
                 "deuda": deuda,
                 "pan_viejo_kg": float(payload.pan_viejo_kg or 0),
             },
+            "items": prepared_items,
             "run_detail": _run_detail(run, auth),
         }
     )
