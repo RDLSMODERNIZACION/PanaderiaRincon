@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.security import AuthContext, get_auth_context
 from app.db import fetch_all, fetch_one, get_conn
@@ -21,7 +21,7 @@ class VisitItemPayload(BaseModel):
 
 
 class SaveVisitPayload(BaseModel):
-    items: list[VisitItemPayload] = []
+    items: list[VisitItemPayload] = Field(default_factory=list)
 
     metodo: str = "efectivo"
     amount: float = 0
@@ -411,6 +411,46 @@ def _stock_for_run(run_id: str) -> list[dict[str, Any]]:
     return result
 
 
+def _stock_availability_for_run(run_id: str, exclude_visit_id: str | None = None) -> dict[str, dict[str, Any]]:
+    rows = fetch_all(
+        """
+        select
+          s.product_id,
+          s.cantidad_cargada,
+          p.nombre as product_nombre,
+          coalesce((
+            select sum(i.cantidad)
+            from public.delivery_visit_items i
+            join public.delivery_visits v on v.id = i.visit_id
+            where v.delivery_run_id = s.delivery_run_id
+              and i.product_id = s.product_id
+              and i.tipo = 'venta'
+              and v.estado <> 'anulada'
+              and (%s is null or v.id <> %s)
+          ), 0) as cantidad_entregada
+        from public.delivery_run_stock s
+        join public.products p on p.id = s.product_id
+        where s.delivery_run_id = %s
+        """,
+        [exclude_visit_id, exclude_visit_id, run_id],
+    )
+
+    result: dict[str, dict[str, Any]] = {}
+
+    for row in rows:
+        cargada = float(row.get("cantidad_cargada") or 0)
+        entregada = float(row.get("cantidad_entregada") or 0)
+        result[str(row["product_id"])] = {
+            "product_id": row["product_id"],
+            "product_nombre": row.get("product_nombre"),
+            "cantidad_cargada": cargada,
+            "cantidad_entregada": entregada,
+            "cantidad_restante": cargada - entregada,
+        }
+
+    return result
+
+
 def _customers_for_run(run: dict[str, Any]) -> list[dict[str, Any]]:
     route_id = run.get("route_id")
     run_id = run["id"]
@@ -585,6 +625,32 @@ def iniciar_reparto(run_id: str, auth: AuthContext = Depends(get_auth_context)):
     return ok(updated)
 
 
+@router.post("/mi-reparto/{run_id}/finalizar")
+def finalizar_reparto(run_id: str, auth: AuthContext = Depends(get_auth_context)):
+    run = _run_row_for_user(run_id, auth)
+
+    if run["estado"] == "cerrado":
+        raise HTTPException(status_code=400, detail="El reparto ya está cerrado.")
+
+    if run["estado"] != "en_recorrido":
+        raise HTTPException(status_code=400, detail="Solo se puede finalizar un reparto iniciado.")
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            update public.delivery_runs
+            set estado = 'cerrado',
+                closed_at = coalesce(closed_at, now())
+            where id = %s
+            returning *
+            """,
+            [run_id],
+        )
+        updated = cur.fetchone()
+
+    return ok(updated)
+
+
 @router.post("/mi-reparto/{run_id}/clientes/{customer_id}/visita")
 def guardar_visita(
     run_id: str,
@@ -596,6 +662,9 @@ def guardar_visita(
 
     if run["estado"] == "cerrado":
         raise HTTPException(status_code=400, detail="El reparto ya está cerrado.")
+
+    if run["estado"] != "en_recorrido":
+        raise HTTPException(status_code=400, detail="Primero tenés que iniciar el reparto.")
 
     customer = fetch_one(
         """
@@ -612,10 +681,56 @@ def guardar_visita(
     if not customer:
         raise HTTPException(status_code=404, detail="Cliente no pertenece al recorrido.")
 
+    existing_visit = fetch_one(
+        """
+        select *
+        from public.delivery_visits
+        where delivery_run_id = %s
+          and customer_id = %s
+          and estado <> 'anulada'
+        order by arrived_at desc
+        limit 1
+        """,
+        [run_id, customer_id],
+    )
+
+    existing_visit_id = existing_visit["id"] if existing_visit else None
+
     clean_items = [
         item for item in payload.items
         if item.product_id and float(item.cantidad or 0) > 0
     ]
+
+    stock_available = _stock_availability_for_run(run_id, exclude_visit_id=existing_visit_id)
+
+    requested_by_product: dict[str, float] = {}
+
+    for item in clean_items:
+        product_id = item.product_id
+        cantidad = float(item.cantidad or 0)
+
+        if cantidad <= 0:
+            continue
+
+        requested_by_product[product_id] = requested_by_product.get(product_id, 0) + cantidad
+
+    for product_id, cantidad in requested_by_product.items():
+        stock_row = stock_available.get(product_id)
+
+        if not stock_row:
+            raise HTTPException(
+                status_code=400,
+                detail=f"El producto {product_id} no está cargado en la mercadería del reparto.",
+            )
+
+        restante = float(stock_row.get("cantidad_restante") or 0)
+        product_nombre = stock_row.get("product_nombre") or product_id
+
+        if cantidad > restante + 0.0001:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No hay suficiente stock de {product_nombre}. Disponible: {restante}. Intentaste dejar: {cantidad}.",
+            )
 
     payment_amount = payload.monto_pagado if payload.monto_pagado is not None else payload.amount
     payment_amount = float(payment_amount or 0)
@@ -659,19 +774,6 @@ def guardar_visita(
 
     total_venta = computed_total
     deuda = max(total_venta - payment_amount, 0)
-
-    existing_visit = fetch_one(
-        """
-        select *
-        from public.delivery_visits
-        where delivery_run_id = %s
-          and customer_id = %s
-          and estado <> 'anulada'
-        order by arrived_at desc
-        limit 1
-        """,
-        [run_id, customer_id],
-    )
 
     with get_conn() as conn, conn.cursor() as cur:
         if existing_visit:
