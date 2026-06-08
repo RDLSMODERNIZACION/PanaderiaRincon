@@ -32,6 +32,8 @@ def _public_user(row: dict[str, Any]) -> dict[str, Any]:
         "user_id": row.get("id"),
         "email": row.get("email"),
         "nombre": row.get("nombre"),
+        "employeeId": row.get("employee_id"),
+        "employee_id": row.get("employee_id"),
         "roleId": row.get("role_id"),
         "role_id": row.get("role_id"),
         "roleName": row.get("role_name") or row.get("role_nombre"),
@@ -67,6 +69,68 @@ def _default_role_id() -> str:
     return role["id"]
 
 
+def _employee_role_for_app_role(role_id: str | None) -> str:
+    if role_id == "role_repartidor":
+        return "Repartidor"
+    if role_id == "role_admin":
+        return "Administrador"
+    return "Sin asignar"
+
+
+def _create_employee_for_user(nombre: str, role_id: str | None = None) -> str:
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            insert into public.employees (nombre, rol, activo)
+            values (%s, %s, true)
+            returning id
+            """,
+            [nombre, _employee_role_for_app_role(role_id)],
+        )
+        employee = cur.fetchone()
+
+    return employee["id"]
+
+
+def _sync_employee_from_user(user_id: str, payload: dict[str, Any]) -> None:
+    user = fetch_one(
+        """
+        select id, nombre, employee_id, role_id
+        from public.app_users
+        where id = %s
+        limit 1
+        """,
+        [user_id],
+    )
+    if not user:
+        return
+
+    employee_id = user.get("employee_id")
+    nombre = payload.get("nombre") or user.get("nombre")
+    role_id = payload.get("role_id") or user.get("role_id")
+
+    if not employee_id:
+        employee_id = _create_employee_for_user(nombre, role_id)
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "update public.app_users set employee_id = %s where id = %s",
+                [employee_id, user_id],
+            )
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            update public.employees
+            set nombre = %s,
+                rol = %s,
+                activo = true,
+                updated_at = now()
+            where id = %s
+            """,
+            [nombre, _employee_role_for_app_role(role_id), employee_id],
+        )
+
+
 @router.post("/login")
 def login(payload: LoginPayload):
     username = payload.username.strip()
@@ -77,7 +141,7 @@ def login(payload: LoginPayload):
 
     user = fetch_one(
         """
-        select u.id, u.email, u.nombre, u.role_id, u.status, r.nombre as role_name
+        select u.id, u.email, u.nombre, u.employee_id, u.role_id, u.status, r.nombre as role_name
         from public.app_users u
         left join public.app_roles r on r.id = u.role_id
         where u.status = 'active'
@@ -94,8 +158,22 @@ def login(payload: LoginPayload):
     if not user:
         raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos.")
 
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("update public.app_users set last_login_at = now() where id = %s", [user["id"]])
+    if not user.get("employee_id"):
+        employee_id = _create_employee_for_user(user["nombre"], user.get("role_id"))
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                update public.app_users
+                set employee_id = %s,
+                    last_login_at = now()
+                where id = %s
+                """,
+                [employee_id, user["id"]],
+            )
+        user["employee_id"] = employee_id
+    else:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("update public.app_users set last_login_at = now() where id = %s", [user["id"]])
 
     return ok(_public_user(user))
 
@@ -130,11 +208,21 @@ def register(payload: RegisterPayload):
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            insert into public.app_users (id, email, nombre, role_id, status, password_plain)
-            values (%s, %s, %s, %s, 'active', %s)
-            returning id, email, nombre, role_id, status
+            insert into public.employees (nombre, rol, activo)
+            values (%s, %s, true)
+            returning id
             """,
-            [user_id, email, nombre, role_id, password],
+            [nombre, "Sin asignar"],
+        )
+        employee = cur.fetchone()
+
+        cur.execute(
+            """
+            insert into public.app_users (id, email, nombre, role_id, employee_id, status, password_plain)
+            values (%s, %s, %s, %s, %s, 'active', %s)
+            returning id, email, nombre, employee_id, role_id, status
+            """,
+            [user_id, email, nombre, role_id, employee["id"], password],
         )
         user = cur.fetchone()
 
@@ -295,14 +383,18 @@ def listar_usuarios(
               u.id,
               u.email,
               u.nombre,
+              u.employee_id,
               u.role_id,
               u.status,
               u.last_login_at,
               u.created_at,
               u.updated_at,
-              r.nombre as role_nombre
+              r.nombre as role_nombre,
+              e.nombre as employee_nombre,
+              e.rol as employee_rol
             from public.app_users u
             left join public.app_roles r on r.id = u.role_id
+            left join public.employees e on e.id = u.employee_id
             {where}
             order by u.nombre asc
             limit %s offset %s
@@ -331,7 +423,16 @@ def crear_usuario(payload: dict[str, Any], auth: AuthContext = Depends(get_auth_
     if "password" in payload:
         payload["password_plain"] = payload.pop("password")
 
+    if not payload.get("role_id"):
+        payload["role_id"] = _default_role_id()
+
+    if not payload.get("employee_id"):
+        nombre = str(payload.get("nombre") or payload.get("email") or "Empleado").strip()
+        payload["employee_id"] = _create_employee_for_user(nombre, payload.get("role_id"))
+
     row = insert_row(APP_USERS, payload)
+    _sync_employee_from_user(row["id"], payload)
+
     row.pop("password_plain", None)
     write_audit(tabla="app_users", record_id=row["id"], accion="crear", usuario_id=auth.audit_user_id, datos_nuevos=row)
     return ok(row)
@@ -349,6 +450,8 @@ def actualizar_usuario(user_id: str, payload: dict[str, Any], auth: AuthContext 
         raise_not_found("Usuario")
 
     row = patch_row(APP_USERS, user_id, payload)
+    _sync_employee_from_user(user_id, payload)
+
     before.pop("password_plain", None)
     row.pop("password_plain", None)
     write_audit(tabla="app_users", record_id=user_id, accion="editar", usuario_id=auth.audit_user_id, datos_anteriores=before, datos_nuevos=row)
@@ -361,7 +464,16 @@ def desactivar_usuario(user_id: str, auth: AuthContext = Depends(get_auth_contex
     before = get_row(APP_USERS, user_id)
     if not before:
         raise_not_found("Usuario")
+
     row = patch_row(APP_USERS, user_id, {"status": "disabled"})
+
+    if row.get("employee_id"):
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "update public.employees set activo = false, updated_at = now() where id = %s",
+                [row["employee_id"]],
+            )
+
     before.pop("password_plain", None)
     row.pop("password_plain", None)
     write_audit(tabla="app_users", record_id=user_id, accion="anular", usuario_id=auth.audit_user_id, datos_anteriores=before, datos_nuevos=row)
