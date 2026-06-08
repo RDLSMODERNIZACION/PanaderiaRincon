@@ -1,7 +1,16 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { CheckCircle2, Clock, MapPin, PackageCheck, Play, RefreshCw, Store, Truck } from "lucide-react"
+import {
+  CheckCircle2,
+  Clock,
+  MapPin,
+  PackageCheck,
+  Play,
+  RefreshCw,
+  Store,
+  Truck
+} from "lucide-react"
 import Button from "@/components/ui/Button"
 import { Card, CardBody, CardHeader } from "@/components/ui/Card"
 import { EmptyBlock, ErrorBlock, LoadingBlock } from "@/components/data/AsyncState"
@@ -70,6 +79,8 @@ type MiRepartoData = {
     started_at?: string | null
     closedAt?: string | null
     closed_at?: string | null
+    createdAt?: string | null
+    created_at?: string | null
   }
   stock: RepartidorStock[]
   customers: RepartidorCustomer[]
@@ -87,13 +98,19 @@ type MiRepartoData = {
 
 function formatDate(value?: string | null) {
   if (!value) return "-"
+
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     const [year, month, day] = value.split("-")
     return `${day}/${month}/${year}`
   }
+
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" })
+
+  return d.toLocaleString("es-AR", {
+    dateStyle: "short",
+    timeStyle: "short"
+  })
 }
 
 function stockProductId(item: RepartidorStock) {
@@ -138,20 +155,26 @@ function statusLabel(status: string) {
 
 export default function MiRepartoView() {
   const { session } = useAuth()
+
   const [data, setData] = useState<MiRepartoData | null>(null)
   const [selectedCustomer, setSelectedCustomer] = useState<RepartidorCustomer | null>(null)
   const [loading, setLoading] = useState(true)
   const [starting, setStarting] = useState(false)
+  const [finishing, setFinishing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (runId?: string) => {
     if (!session) return
 
     setLoading(true)
     setError(null)
 
     try {
-      const payload = await apiGet(session, "/api/repartidor/mi-reparto")
+      const path = runId
+        ? `/api/repartidor/mi-reparto/${encodeURIComponent(runId)}`
+        : "/api/repartidor/mi-reparto"
+
+      const payload = await apiGet(session, path)
       setData(unwrapData<MiRepartoData>(payload))
     } catch (exc: any) {
       setError(exc?.message || "No se pudo cargar el reparto")
@@ -175,8 +198,13 @@ export default function MiRepartoView() {
     setError(null)
 
     try {
-      await apiPost(session, `/api/repartidor/mi-reparto/${encodeURIComponent(data.run.id)}/iniciar`, {})
-      await load()
+      await apiPost(
+        session,
+        `/api/repartidor/mi-reparto/${encodeURIComponent(data.run.id)}/iniciar`,
+        {}
+      )
+
+      await load(data.run.id)
     } catch (exc: any) {
       setError(exc?.message || "No se pudo iniciar el reparto")
     } finally {
@@ -184,12 +212,41 @@ export default function MiRepartoView() {
     }
   }
 
+  async function finalizarReparto() {
+    if (!session || !data?.run?.id) return
+
+    if (!window.confirm("¿Finalizar este reparto? Después no se podrán cargar más visitas.")) return
+
+    setFinishing(true)
+    setError(null)
+
+    try {
+      await apiPost(
+        session,
+        `/api/repartidor/mi-reparto/${encodeURIComponent(data.run.id)}/finalizar`,
+        {}
+      )
+
+      setSelectedCustomer(null)
+      await load(data.run.id)
+    } catch (exc: any) {
+      setError(exc?.message || "No se pudo finalizar el reparto")
+    } finally {
+      setFinishing(false)
+    }
+  }
+
   if (loading) return <LoadingBlock />
-  if (error) return <ErrorBlock error={error} onRetry={load} />
+  if (error) return <ErrorBlock error={error} onRetry={() => load(data?.run?.id)} />
   if (!data) return <EmptyBlock label="No hay reparto activo asignado." />
 
   const run = data.run
   const summary = data.summary || {}
+
+  const isPrepared = run.estado === "preparado"
+  const isStarted = run.estado === "en_recorrido"
+  const isClosed = run.estado === "cerrado"
+
   const productosCargados = summary.productosCargados ?? summary.productos_cargados ?? data.stock.length
   const clientesTotal = summary.clientesTotal ?? summary.clientes_total ?? data.customers.length
   const clientesVisitados = summary.clientesVisitados ?? summary.clientes_visitados ?? 0
@@ -203,13 +260,22 @@ export default function MiRepartoView() {
           subtitle="Pantalla operativa para el repartidor."
           right={
             <div className="flex flex-wrap justify-end gap-2">
-              <Button variant="secondary" onClick={load}>
-                <RefreshCw className="mr-2 h-4 w-4" /> Actualizar
+              <Button variant="secondary" onClick={() => load(run.id)}>
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Actualizar
               </Button>
 
-              {run.estado === "preparado" ? (
+              {isPrepared ? (
                 <Button onClick={iniciarReparto} disabled={starting}>
-                  <Play className="mr-2 h-4 w-4" /> {starting ? "Iniciando..." : "Iniciar reparto"}
+                  <Play className="mr-2 h-4 w-4" />
+                  {starting ? "Iniciando..." : "Iniciar reparto"}
+                </Button>
+              ) : null}
+
+              {isStarted ? (
+                <Button onClick={finalizarReparto} disabled={finishing}>
+                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                  {finishing ? "Finalizando..." : "Finalizar reparto"}
                 </Button>
               ) : null}
             </div>
@@ -267,92 +333,125 @@ export default function MiRepartoView() {
         </CardBody>
       </Card>
 
-      <Card>
-        <CardHeader title="Mercadería asignada" subtitle="Lo cargado por administración para este reparto." />
-        <CardBody>
-          {data.stock.length === 0 ? (
-            <EmptyBlock label="Todavía no hay mercadería asignada." />
-          ) : (
-            <div className="grid gap-3 md:grid-cols-3">
-              {data.stock.map(item => (
-                <div key={String(item.id)} className="rounded-2xl border border-zinc-200 p-4">
-                  <div className="font-semibold text-zinc-900">{stockName(item)}</div>
-                  <div className="mt-1 text-xs text-zinc-500">Unidad: {stockUnit(item) || "-"}</div>
-                  <div className="mt-3 flex items-end justify-between">
-                    <div>
-                      <div className="text-xs text-zinc-500">Cargado</div>
-                      <div className="text-xl font-semibold">{stockLoaded(item)}</div>
+      {!isStarted ? (
+        <Card>
+          <CardHeader
+            title={isClosed ? "Reparto finalizado" : "Reparto pendiente de inicio"}
+            subtitle={
+              isClosed
+                ? "Este reparto ya fue finalizado. No se pueden cargar más visitas."
+                : "Para ver la mercadería, los locales y registrar visitas, primero tenés que iniciar el reparto."
+            }
+          />
+          <CardBody>
+            <div className={`rounded-2xl border px-4 py-4 text-sm ${
+              isClosed
+                ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                : "border-amber-200 bg-amber-50 text-amber-800"
+            }`}>
+              {isClosed
+                ? "El reparto quedó cerrado para rendición."
+                : "Tocá “Iniciar reparto” cuando el repartidor salga a la calle."}
+            </div>
+          </CardBody>
+        </Card>
+      ) : (
+        <>
+          <Card>
+            <CardHeader title="Mercadería asignada" subtitle="Lo cargado por administración para este reparto." />
+            <CardBody>
+              {data.stock.length === 0 ? (
+                <EmptyBlock label="Todavía no hay mercadería asignada." />
+              ) : (
+                <div className="grid gap-3 md:grid-cols-3">
+                  {data.stock.map(item => (
+                    <div key={String(item.id)} className="rounded-2xl border border-zinc-200 p-4">
+                      <div className="font-semibold text-zinc-900">{stockName(item)}</div>
+                      <div className="mt-1 text-xs text-zinc-500">Unidad: {stockUnit(item) || "-"}</div>
+
+                      <div className="mt-3 flex items-end justify-between">
+                        <div>
+                          <div className="text-xs text-zinc-500">Cargado</div>
+                          <div className="text-xl font-semibold">{stockLoaded(item)}</div>
+                        </div>
+
+                        <div className="text-right">
+                          <div className="text-xs text-zinc-500">Restante</div>
+                          <div className="text-xl font-semibold">{stockRemaining(item)}</div>
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <div className="text-xs text-zinc-500">Restante</div>
-                      <div className="text-xl font-semibold">{stockRemaining(item)}</div>
-                    </div>
-                  </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          )}
-        </CardBody>
-      </Card>
+              )}
+            </CardBody>
+          </Card>
 
-      <Card>
-        <CardHeader title="Locales del recorrido" subtitle="Tocá un local para registrar mercadería, cobro, deuda y pan viejo." />
-        <CardBody className="p-0">
-          {sortedCustomers.length === 0 ? (
-            <div className="p-5">
-              <EmptyBlock label="Este recorrido todavía no tiene clientes asociados." />
-            </div>
-          ) : (
-            <div className="divide-y divide-zinc-100">
-              {sortedCustomers.map(customer => {
-                const status = customerStatus(customer)
+          <Card>
+            <CardHeader title="Locales del recorrido" subtitle="Tocá un local para registrar mercadería, cobro, deuda y pan viejo." />
+            <CardBody className="p-0">
+              {sortedCustomers.length === 0 ? (
+                <div className="p-5">
+                  <EmptyBlock label="Este recorrido todavía no tiene clientes asociados." />
+                </div>
+              ) : (
+                <div className="divide-y divide-zinc-100">
+                  {sortedCustomers.map(customer => {
+                    const status = customerStatus(customer)
 
-                return (
-                  <button
-                    key={customerId(customer)}
-                    type="button"
-                    onClick={() => setSelectedCustomer(customer)}
-                    className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-zinc-50"
-                  >
-                    <div className="flex min-w-0 items-start gap-3">
-                      <div className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-zinc-100 text-sm font-semibold text-zinc-700">
-                        {customer.orden || "-"}
-                      </div>
-
-                      <div className="min-w-0">
-                        <div className="font-semibold text-zinc-900">{customer.nombre || customerId(customer)}</div>
-                        {customer.direccion ? (
-                          <div className="mt-1 flex items-center gap-1 text-sm text-zinc-500">
-                            <MapPin className="h-3.5 w-3.5" /> {customer.direccion}
+                    return (
+                      <button
+                        key={customerId(customer)}
+                        type="button"
+                        onClick={() => setSelectedCustomer(customer)}
+                        className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-zinc-50"
+                      >
+                        <div className="flex min-w-0 items-start gap-3">
+                          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-zinc-100 text-sm font-semibold text-zinc-700">
+                            {customer.orden || "-"}
                           </div>
-                        ) : null}
-                        {customer.telefono ? <div className="mt-1 text-xs text-zinc-500">{customer.telefono}</div> : null}
-                      </div>
-                    </div>
 
-                    <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium ${statusClass(status)}`}>
-                      {statusLabel(status)}
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-          )}
-        </CardBody>
-      </Card>
+                          <div className="min-w-0">
+                            <div className="font-semibold text-zinc-900">{customer.nombre || customerId(customer)}</div>
 
-      <VisitModal
-        open={!!selectedCustomer}
-        runId={run.id}
-        customer={selectedCustomer}
-        stock={data.stock}
-        session={session}
-        onClose={() => setSelectedCustomer(null)}
-        onSaved={async () => {
-          setSelectedCustomer(null)
-          await load()
-        }}
-      />
+                            {customer.direccion ? (
+                              <div className="mt-1 flex items-center gap-1 text-sm text-zinc-500">
+                                <MapPin className="h-3.5 w-3.5" />
+                                {customer.direccion}
+                              </div>
+                            ) : null}
+
+                            {customer.telefono ? (
+                              <div className="mt-1 text-xs text-zinc-500">{customer.telefono}</div>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium ${statusClass(status)}`}>
+                          {statusLabel(status)}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </CardBody>
+          </Card>
+
+          <VisitModal
+            open={!!selectedCustomer}
+            runId={run.id}
+            customer={selectedCustomer}
+            stock={data.stock}
+            session={session}
+            onClose={() => setSelectedCustomer(null)}
+            onSaved={async () => {
+              setSelectedCustomer(null)
+              await load(run.id)
+            }}
+          />
+        </>
+      )}
     </div>
   )
 }

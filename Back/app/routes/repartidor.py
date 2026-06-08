@@ -412,34 +412,58 @@ def _stock_for_run(run_id: str) -> list[dict[str, Any]]:
 
 
 def _stock_availability_for_run(run_id: str, exclude_visit_id: str | None = None) -> dict[str, dict[str, Any]]:
-    rows = fetch_all(
-        """
-        select
-          s.product_id,
-          s.cantidad_cargada,
-          p.nombre as product_nombre,
-          coalesce((
-            select sum(i.cantidad)
-            from public.delivery_visit_items i
-            join public.delivery_visits v on v.id = i.visit_id
-            where v.delivery_run_id = s.delivery_run_id
-              and i.product_id = s.product_id
-              and i.tipo = 'venta'
-              and v.estado <> 'anulada'
-              and (%s is null or v.id <> %s)
-          ), 0) as cantidad_entregada
-        from public.delivery_run_stock s
-        join public.products p on p.id = s.product_id
-        where s.delivery_run_id = %s
-        """,
-        [exclude_visit_id, exclude_visit_id, run_id],
-    )
+    if exclude_visit_id:
+        rows = fetch_all(
+            """
+            select
+              s.product_id,
+              s.cantidad_cargada,
+              p.nombre as product_nombre,
+              coalesce((
+                select sum(i.cantidad)
+                from public.delivery_visit_items i
+                join public.delivery_visits v on v.id = i.visit_id
+                where v.delivery_run_id = s.delivery_run_id
+                  and i.product_id = s.product_id
+                  and i.tipo = 'venta'
+                  and v.estado <> 'anulada'
+                  and v.id <> %s
+              ), 0) as cantidad_entregada
+            from public.delivery_run_stock s
+            join public.products p on p.id = s.product_id
+            where s.delivery_run_id = %s
+            """,
+            [exclude_visit_id, run_id],
+        )
+    else:
+        rows = fetch_all(
+            """
+            select
+              s.product_id,
+              s.cantidad_cargada,
+              p.nombre as product_nombre,
+              coalesce((
+                select sum(i.cantidad)
+                from public.delivery_visit_items i
+                join public.delivery_visits v on v.id = i.visit_id
+                where v.delivery_run_id = s.delivery_run_id
+                  and i.product_id = s.product_id
+                  and i.tipo = 'venta'
+                  and v.estado <> 'anulada'
+              ), 0) as cantidad_entregada
+            from public.delivery_run_stock s
+            join public.products p on p.id = s.product_id
+            where s.delivery_run_id = %s
+            """,
+            [run_id],
+        )
 
     result: dict[str, dict[str, Any]] = {}
 
     for row in rows:
         cargada = float(row.get("cantidad_cargada") or 0)
         entregada = float(row.get("cantidad_entregada") or 0)
+
         result[str(row["product_id"])] = {
             "product_id": row["product_id"],
             "product_nombre": row.get("product_nombre"),
