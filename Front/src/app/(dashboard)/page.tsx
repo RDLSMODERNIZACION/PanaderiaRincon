@@ -1,5 +1,4 @@
-import DashboardView from "@/features/dashboard/DashboardView"
+export const dynamic = "force-dynamic"
 
-export default function Page() {
-  return <DashboardView />
-}
+import DashboardView from "@/features/dashboard/DashboardView"
+export default function Page() { return <DashboardView /> }

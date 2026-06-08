@@ -1,90 +1,72 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useEffect, useState } from "react"
+import { CheckCircle2, Database, RefreshCw, Server, Shield } from "lucide-react"
+import Button from "@/components/ui/Button"
 import { Card, CardBody, CardHeader } from "@/components/ui/Card"
 import Badge from "@/components/ui/Badge"
-import Button from "@/components/ui/Button"
-import Select from "@/components/ui/Select"
-import Input from "@/components/ui/Input"
-import { Save } from "lucide-react"
+import CrudTableView from "@/features/crud/CrudTableView"
+import { useAuth } from "@/features/auth/AuthProvider"
+import { apiGet } from "@/lib/api"
 
 export default function ConfiguracionView() {
-  const [nombre, setNombre] = useState("Panadería Rincon")
-  const [moneda, setMoneda] = useState("ARS")
-  const [alertas, setAlertas] = useState(true)
-  const [mermaMax, setMermaMax] = useState("0.06")
+  const { session, user, refreshMe } = useAuth()
+  const [health, setHealth] = useState<any>(null)
+  const [db, setDb] = useState<any>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const test = useCallback(async () => {
+    if (!session) return
+    setError(null)
+    try {
+      const [h, d] = await Promise.all([apiGet(session, "/health"), apiGet(session, "/health/db")])
+      setHealth(h)
+      setDb(d)
+    } catch (exc: any) {
+      setError(exc?.message || "No se pudo probar la conexión")
+    }
+  }, [session])
+
+  useEffect(() => { test() }, [test])
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Configuración</h1>
-          <p className="mt-1 text-sm text-zinc-600">Pantalla demo para completar el “formato admin”.</p>
-        </div>
-        <Button>
-          <Save className="mr-2 h-4 w-4" /> Guardar (demo)
-        </Button>
+      <div>
+        <h1 className="text-xl font-semibold tracking-tight">Configuración</h1>
+        <p className="mt-1 text-sm text-zinc-600">Conexión, sesión y parámetros generales del negocio.</p>
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <Card className="xl:col-span-2">
-          <CardHeader title="Negocio" subtitle="Preferencias generales" />
-          <CardBody className="space-y-4">
-            <div>
-              <div className="text-xs text-zinc-500">Nombre</div>
-              <Input value={nombre} onChange={e => setNombre(e.target.value)} />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <div className="text-xs text-zinc-500">Moneda</div>
-                <Select value={moneda} onChange={e => setMoneda(e.target.value)}>
-                  <option value="ARS">ARS</option>
-                  <option value="USD">USD</option>
-                </Select>
-              </div>
-              <div>
-                <div className="text-xs text-zinc-500">Merma máxima (alerta)</div>
-                <Input value={mermaMax} onChange={e => setMermaMax(e.target.value)} />
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-semibold">Alertas operativas</div>
-                  <div className="text-xs text-zinc-600">Stock bajo, merma alta, etc.</div>
-                </div>
-                <button
-                  className="rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-sm hover:bg-zinc-100"
-                  onClick={() => setAlertas(v => !v)}
-                >
-                  {alertas ? "Activadas" : "Desactivadas"}
-                </button>
-              </div>
-            </div>
+        <Card>
+          <CardHeader title="Backend" subtitle="Render / FastAPI" right={<Button variant="secondary" size="sm" onClick={test}><RefreshCw className="mr-2 h-4 w-4" />Probar</Button>} />
+          <CardBody className="space-y-3 text-sm">
+            <div className="flex items-center gap-2"><Server className="h-4 w-4" /><span className="truncate font-mono text-xs">{session?.apiBaseUrl}</span></div>
+            <div className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4" />API <Badge variant={health?.ok ? "success" : "danger"}>{health?.ok ? "OK" : "Sin probar"}</Badge></div>
+            {error ? <div className="rounded-xl border border-red-200 bg-red-50 p-2 text-red-700">{error}</div> : null}
           </CardBody>
         </Card>
 
         <Card>
-          <CardHeader title="Estado" subtitle="Info rápida" />
-          <CardBody className="space-y-3">
-            <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-              <div className="text-xs text-zinc-500">Ambiente</div>
-              <div className="mt-1 text-sm font-semibold">Demo local</div>
-              <div className="mt-2">
-                <Badge variant="muted">Sin DB</Badge>
-              </div>
-            </div>
-            <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-              <div className="text-xs text-zinc-500">Sugerencia</div>
-              <div className="mt-1 text-sm text-zinc-700">
-                Próximo paso: conectar endpoints de Node/Express o Node-RED para reemplazar{" "}
-                <code className="rounded bg-zinc-100 px-1">seed.ts</code>.
-              </div>
-            </div>
+          <CardHeader title="Base de datos" subtitle="Supabase PostgreSQL" />
+          <CardBody className="space-y-3 text-sm">
+            <div className="flex items-center gap-2"><Database className="h-4 w-4" />Estado <Badge variant={db?.ok ? "success" : "danger"}>{db?.ok ? "Conectada" : "Sin conexión"}</Badge></div>
+            <div>Base: <span className="font-semibold">{db?.database || "—"}</span></div>
+            <div>Usuario DB: <span className="font-semibold">{db?.user || "—"}</span></div>
+            <div className="text-xs text-zinc-500">{db?.server}</div>
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardHeader title="Sesión" subtitle="Permisos recibidos" right={<Button variant="secondary" size="sm" onClick={refreshMe}>Actualizar</Button>} />
+          <CardBody className="space-y-3 text-sm">
+            <div className="flex items-center gap-2"><Shield className="h-4 w-4" />Rol <Badge>{user?.roleName || "Desarrollo"}</Badge></div>
+            <div>ID usuario: <span className="font-mono text-xs">{user?.userId || "—"}</span></div>
+            <div>Permisos: <span className="font-semibold">{user?.permissions?.includes("*") ? "todos" : user?.permissions?.length || 0}</span></div>
           </CardBody>
         </Card>
       </div>
+
+      <CrudTableView tableName="business_settings" title="Parámetros del negocio" subtitle="Nombre, moneda, alertas y merma máxima." />
     </div>
   )
 }

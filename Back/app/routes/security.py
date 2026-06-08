@@ -2,27 +2,141 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from app.core.security import AuthContext, ensure_any_permission, get_auth_context
-from app.db import fetch_all, get_conn
+from app.db import fetch_all, fetch_one, get_conn
 from app.repositories.crud import delete_row, get_row, insert_row, list_rows, patch_row, new_id
-from app.repositories.tables import APP_PERMISSIONS, APP_ROLE_PERMISSIONS, APP_ROLES, APP_USERS
+from app.repositories.tables import APP_PERMISSIONS, APP_ROLES, APP_USERS
 from app.routes.common import ok, raise_not_found
 from app.services.audit import write_audit
 
 router = APIRouter(prefix="/api/seguridad", tags=["seguridad"])
 
 
+class LoginPayload(BaseModel):
+    username: str
+    password: str
+
+
+class RegisterPayload(BaseModel):
+    username: str
+    password: str
+    nombre: str | None = None
+
+
+def _public_user(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "userId": row.get("id"),
+        "user_id": row.get("id"),
+        "email": row.get("email"),
+        "nombre": row.get("nombre"),
+        "roleId": row.get("role_id"),
+        "role_id": row.get("role_id"),
+        "roleName": row.get("role_name") or row.get("role_nombre"),
+        "role_name": row.get("role_name") or row.get("role_nombre"),
+        "status": row.get("status"),
+    }
+
+
+def _default_role_id() -> str | None:
+    row = fetch_one("select id from public.app_roles where id = %s limit 1", ["role_admin"])
+    if row:
+        return row["id"]
+
+    row = fetch_one("select id from public.app_roles where activo = true order by nombre asc limit 1")
+    return row["id"] if row else None
+
+
+@router.post("/login")
+def login(payload: LoginPayload):
+    username = payload.username.strip()
+    password = payload.password
+
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="Ingresá usuario y contraseña.")
+
+    user = fetch_one(
+        """
+        select u.id, u.email, u.nombre, u.role_id, u.status, r.nombre as role_name
+        from public.app_users u
+        left join public.app_roles r on r.id = u.role_id
+        where u.status = 'active'
+          and coalesce(u.password_plain, '') = %s
+          and (
+            lower(coalesce(u.email, '')) = lower(%s)
+            or lower(coalesce(u.nombre, '')) = lower(%s)
+          )
+        limit 1
+        """,
+        [password, username, username],
+    )
+
+    if not user:
+        raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos.")
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update public.app_users set last_login_at = now() where id = %s", [user["id"]])
+
+    return ok(_public_user(user))
+
+
+@router.post("/register")
+def register(payload: RegisterPayload):
+    username = payload.username.strip()
+    password = payload.password
+    nombre = (payload.nombre or username).strip()
+
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="Ingresá usuario y contraseña.")
+
+    existing = fetch_one(
+        """
+        select id
+        from public.app_users
+        where lower(coalesce(email, '')) = lower(%s)
+           or lower(coalesce(nombre, '')) = lower(%s)
+        limit 1
+        """,
+        [username, username],
+    )
+
+    if existing:
+        raise HTTPException(status_code=409, detail="Ese usuario ya existe.")
+
+    role_id = _default_role_id()
+    email = username if "@" in username else None
+    user_id = new_id("usr")
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            insert into public.app_users (id, email, nombre, role_id, status, password_plain)
+            values (%s, %s, %s, %s, 'active', %s)
+            returning id, email, nombre, role_id, status
+            """,
+            [user_id, email, nombre, role_id, password],
+        )
+        user = cur.fetchone()
+
+    return ok(_public_user(user))
+
+
 @router.get("/me")
 def me(auth: AuthContext = Depends(get_auth_context)):
     return ok(
         {
+            "userId": auth.user_id,
             "user_id": auth.user_id,
+            "roleId": auth.role_id,
             "role_id": auth.role_id,
+            "roleName": auth.role_name,
             "role_name": auth.role_name,
             "permissions": sorted(auth.permissions),
+            "isApiKey": auth.is_api_key,
             "is_api_key": auth.is_api_key,
+            "isDevelopmentOpen": auth.is_development_open,
             "is_development_open": auth.is_development_open,
         }
     )
@@ -149,17 +263,28 @@ def listar_usuarios(
     ensure_any_permission(auth, "security.users.read", "admin.crud.read")
     params: list[Any] = []
     where = ""
+
     if status:
         where = "where u.status = %s"
         params.append(status)
+
     params.extend([limit, offset])
+
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             f"""
-            select u.*, r.nombre as role_nombre, e.nombre as employee_nombre
+            select
+              u.id,
+              u.email,
+              u.nombre,
+              u.role_id,
+              u.status,
+              u.last_login_at,
+              u.created_at,
+              u.updated_at,
+              r.nombre as role_nombre
             from public.app_users u
             left join public.app_roles r on r.id = u.role_id
-            left join public.employees e on e.id = u.employee_id
             {where}
             order by u.nombre asc
             limit %s offset %s
@@ -167,6 +292,7 @@ def listar_usuarios(
             params,
         )
         rows = cur.fetchall()
+
     return ok(rows)
 
 
@@ -176,13 +302,19 @@ def obtener_usuario(user_id: str, auth: AuthContext = Depends(get_auth_context))
     row = get_row(APP_USERS, user_id)
     if not row:
         raise_not_found("Usuario")
+    row.pop("password_plain", None)
     return ok(row)
 
 
 @router.post("/usuarios")
 def crear_usuario(payload: dict[str, Any], auth: AuthContext = Depends(get_auth_context)):
     ensure_any_permission(auth, "security.users.write", "admin.crud.write")
+
+    if "password" in payload:
+        payload["password_plain"] = payload.pop("password")
+
     row = insert_row(APP_USERS, payload)
+    row.pop("password_plain", None)
     write_audit(tabla="app_users", record_id=row["id"], accion="crear", usuario_id=auth.audit_user_id, datos_nuevos=row)
     return ok(row)
 
@@ -190,10 +322,17 @@ def crear_usuario(payload: dict[str, Any], auth: AuthContext = Depends(get_auth_
 @router.patch("/usuarios/{user_id}")
 def actualizar_usuario(user_id: str, payload: dict[str, Any], auth: AuthContext = Depends(get_auth_context)):
     ensure_any_permission(auth, "security.users.write", "admin.crud.write")
+
+    if "password" in payload:
+        payload["password_plain"] = payload.pop("password")
+
     before = get_row(APP_USERS, user_id)
     if not before:
         raise_not_found("Usuario")
+
     row = patch_row(APP_USERS, user_id, payload)
+    before.pop("password_plain", None)
+    row.pop("password_plain", None)
     write_audit(tabla="app_users", record_id=user_id, accion="editar", usuario_id=auth.audit_user_id, datos_anteriores=before, datos_nuevos=row)
     return ok(row)
 
@@ -205,5 +344,7 @@ def desactivar_usuario(user_id: str, auth: AuthContext = Depends(get_auth_contex
     if not before:
         raise_not_found("Usuario")
     row = patch_row(APP_USERS, user_id, {"status": "disabled"})
+    before.pop("password_plain", None)
+    row.pop("password_plain", None)
     write_audit(tabla="app_users", record_id=user_id, accion="anular", usuario_id=auth.audit_user_id, datos_anteriores=before, datos_nuevos=row)
     return ok(message="Usuario desactivado", data=row)
