@@ -16,15 +16,15 @@ class ApiModel(BaseModel):
     )
 
 
-CategoriaProducto = Literal["Panadería", "Facturería", "Pastelería", "Sandwiches", "Café"]
-UnidadVenta = Literal["u", "kg"]
-UnidadInsumo = Literal["kg", "g", "l", "u"]
-CanalVenta = Literal["Mostrador", "Delivery", "Mayorista"]
-MedioPago = Literal["Efectivo", "Débito", "Crédito", "QR"]
-Turno = Literal["Mañana", "Tarde", "Noche"]
-MovimientoTipo = Literal["Entrada", "Salida", "Ajuste"]
-RolEmpleado = Literal["Panadero", "Ayudante", "Vendedor", "Pastelero", "Delivery"]
-Horno = Literal["Horno 1", "Horno 2"]
+CategoriaProducto = str
+UnidadVenta = str
+UnidadInsumo = str
+CanalVenta = str
+MedioPago = str
+Turno = str
+MovimientoTipo = str
+RolEmpleado = str
+Horno = str
 
 
 class ProductoCreate(ApiModel):
@@ -75,13 +75,13 @@ class RecetaIngredienteIn(ApiModel):
 
 class RecetaCreate(ApiModel):
     id: str | None = None
-    producto_id: str
+    product_id: str
     rinde_unidades: float = Field(gt=0)
     ingredientes: list[RecetaIngredienteIn]
 
 
 class RecetaPatch(ApiModel):
-    producto_id: str | None = None
+    product_id: str | None = None
     rinde_unidades: float | None = None
     ingredientes: list[RecetaIngredienteIn] | None = None
 

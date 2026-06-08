@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
 from app.db import close_pool, get_pool
-from app.routes import admin_schema, dashboard, employees, energy, health, inventory, production, products, recipes, sales, supplies
+from app.routes import admin_crud, admin_schema, dashboard, delivery, employees, energy, health, inventory, production, products, recipes, sales, security, supplies
 
 settings = get_settings()
 
@@ -50,6 +50,7 @@ async def general_error_handler(_: Request, exc: Exception):
 
 
 app.include_router(health.router)
+app.include_router(security.router)
 app.include_router(products.router)
 app.include_router(supplies.router)
 app.include_router(recipes.router)
@@ -58,8 +59,10 @@ app.include_router(production.router)
 app.include_router(inventory.router)
 app.include_router(employees.router)
 app.include_router(energy.router)
+app.include_router(delivery.router)
 app.include_router(dashboard.router)
 app.include_router(admin_schema.router)
+app.include_router(admin_crud.router)
 
 
 @app.on_event("startup")

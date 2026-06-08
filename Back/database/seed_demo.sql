@@ -1,64 +1,49 @@
--- Datos demo opcionales. Ejecutar después de schema.sql si querés probar rápido.
+-- Datos demo opcionales para probar el backend.
+-- Ejecutar después de database/schema.sql.
 
 begin;
 
-insert into public.supplies (id, nombre, unidad, proveedor, costo_unitario, stock_actual, stock_minimo) values
-  ('harina-000', 'Harina 000', 'kg', 'Molino San José', 520, 220, 80),
-  ('harina-0000', 'Harina 0000', 'kg', 'Molino San José', 560, 120, 50),
-  ('levadura', 'Levadura', 'kg', 'LevanCo', 1900, 12, 6),
-  ('sal', 'Sal fina', 'kg', 'Salinas SA', 280, 18, 8),
-  ('azucar', 'Azúcar', 'kg', 'Dulce Norte', 920, 55, 20),
-  ('manteca', 'Manteca', 'kg', 'Lácteos La Vaca', 4200, 24, 10),
-  ('huevos', 'Huevos', 'u', 'Granja El Trigal', 140, 380, 200),
-  ('dulce-leche', 'Dulce de leche', 'kg', 'Dulzor', 3900, 16, 8),
-  ('jamon', 'Jamón', 'kg', 'Fiambres Don Pepe', 6900, 9, 6),
-  ('queso', 'Queso', 'kg', 'Fiambres Don Pepe', 8200, 11, 7),
-  ('cafe', 'Café en grano', 'kg', 'Tueste Barrio', 12500, 6, 4)
-on conflict (id) do nothing;
-
-insert into public.products (id, nombre, categoria, unidad_venta, precio_venta, costo_unitario, activo, receta_id) values
-  ('pan-frances', 'Pan francés', 'Panadería', 'kg', 2200, 980, true, 'r-pan-frances'),
-  ('pan-lactal', 'Pan lactal', 'Panadería', 'u', 2800, 1200, true, 'r-pan-lactal'),
-  ('fugazzeta', 'Fugazzeta', 'Panadería', 'u', 3500, 1600, true, 'r-fugazzeta'),
-  ('medialuna-manteca', 'Medialuna de manteca', 'Facturería', 'u', 550, 240, true, 'r-medialuna'),
-  ('factura-dulce', 'Factura D. leche', 'Facturería', 'u', 650, 290, true, 'r-factura'),
-  ('chipa', 'Chipá', 'Facturería', 'u', 450, 230, true, null),
-  ('torta-rogel', 'Rogel', 'Pastelería', 'u', 18000, 8200, true, null),
-  ('brownie', 'Brownie', 'Pastelería', 'u', 2500, 1100, true, null),
-  ('sandwich-jyq', 'Sándwich JyQ', 'Sandwiches', 'u', 5200, 2600, true, null),
-  ('cafe-americano', 'Café americano', 'Café', 'u', 1800, 520, true, null),
-  ('cafe-latte', 'Café latte', 'Café', 'u', 2300, 720, true, null)
-on conflict (id) do nothing;
-
-insert into public.recipes (id, product_id, rinde_unidades) values
-  ('r-pan-frances', 'pan-frances', 10),
-  ('r-pan-lactal', 'pan-lactal', 8),
-  ('r-fugazzeta', 'fugazzeta', 6),
-  ('r-medialuna', 'medialuna-manteca', 40),
-  ('r-factura', 'factura-dulce', 30)
-on conflict (id) do nothing;
-
-insert into public.recipe_items (id, recipe_id, supply_id, cantidad, unidad) values
-  ('ri-pan-frances-1', 'r-pan-frances', 'harina-000', 6, 'kg'),
-  ('ri-pan-frances-2', 'r-pan-frances', 'levadura', 0.12, 'kg'),
-  ('ri-pan-frances-3', 'r-pan-frances', 'sal', 0.12, 'kg'),
-  ('ri-pan-lactal-1', 'r-pan-lactal', 'harina-0000', 2.2, 'kg'),
-  ('ri-pan-lactal-2', 'r-pan-lactal', 'levadura', 0.06, 'kg'),
-  ('ri-pan-lactal-3', 'r-pan-lactal', 'sal', 0.04, 'kg'),
-  ('ri-pan-lactal-4', 'r-pan-lactal', 'manteca', 0.18, 'kg'),
-  ('ri-fugazzeta-1', 'r-fugazzeta', 'harina-000', 1.8, 'kg'),
-  ('ri-fugazzeta-2', 'r-fugazzeta', 'levadura', 0.05, 'kg'),
-  ('ri-fugazzeta-3', 'r-fugazzeta', 'sal', 0.03, 'kg'),
-  ('ri-fugazzeta-4', 'r-fugazzeta', 'queso', 0.6, 'kg')
-on conflict (id) do nothing;
+insert into public.products (id, nombre, categoria, unidad_venta, precio_venta, costo_unitario, activo) values
+  ('prod_pan_kg', 'Pan', 'Panadería', 'kg', 2500, 1200, true),
+  ('prod_pan_rallado_kg', 'Pan rallado', 'Panadería', 'kg', 1800, 600, true),
+  ('prod_facturas_docena', 'Facturas', 'Facturería', 'docena', 9000, 4500, true),
+  ('prod_prepizza_u', 'Prepizza', 'Panadería', 'u', 1500, 700, true)
+on conflict (id) do update set
+  nombre = excluded.nombre,
+  categoria = excluded.categoria,
+  unidad_venta = excluded.unidad_venta,
+  precio_venta = excluded.precio_venta,
+  costo_unitario = excluded.costo_unitario,
+  activo = excluded.activo;
 
 insert into public.employees (id, nombre, rol, costo_hora, activo) values
-  ('e-ana', 'Ana Díaz', 'Vendedor', 4200, true),
-  ('e-mati', 'Matías Rojas', 'Panadero', 5600, true),
-  ('e-sol', 'Sol Benítez', 'Pastelero', 6100, true),
-  ('e-nico', 'Nicolás Vera', 'Ayudante', 3800, true),
-  ('e-vale', 'Valeria Luna', 'Vendedor', 4100, true),
-  ('e-lucho', 'Luciano Paz', 'Delivery', 3900, true)
-on conflict (id) do nothing;
+  ('emp_repartidor_1', 'Repartidor Demo', 'Delivery', 0, true),
+  ('emp_admin_1', 'Administrador Demo', 'Administrador', 0, true)
+on conflict (id) do update set nombre = excluded.nombre, rol = excluded.rol, activo = excluded.activo;
+
+insert into public.app_users (id, email, nombre, role_id, employee_id, status) values
+  ('user_admin', 'admin@panaderiarincon.local', 'Administrador', 'role_admin', 'emp_admin_1', 'active'),
+  ('user_repartidor_1', 'repartidor@panaderiarincon.local', 'Repartidor Demo', 'role_repartidor', 'emp_repartidor_1', 'active')
+on conflict (id) do update set role_id = excluded.role_id, employee_id = excluded.employee_id, status = excluded.status;
+
+insert into public.customers (id, nombre, direccion, telefono, activo, observaciones) values
+  ('cli_kiosco_centro', 'Kiosco Centro', 'Av. Principal 123', '', true, 'Cliente demo'),
+  ('cli_almacen_norte', 'Almacén Norte', 'Barrio Norte', '', true, 'Cliente demo')
+on conflict (id) do update set nombre = excluded.nombre, direccion = excluded.direccion, activo = excluded.activo;
+
+insert into public.product_prices (id, product_id, customer_id, precio, fecha_desde, activo) values
+  ('precio_pan_general', 'prod_pan_kg', null, 2500, current_date, true),
+  ('precio_pan_rallado_general', 'prod_pan_rallado_kg', null, 1800, current_date, true),
+  ('precio_facturas_general', 'prod_facturas_docena', null, 9000, current_date, true)
+on conflict (id) do update set precio = excluded.precio, activo = excluded.activo;
+
+insert into public.delivery_routes (id, nombre, activo) values
+  ('ruta_centro', 'Centro', true)
+on conflict (id) do update set nombre = excluded.nombre, activo = excluded.activo;
+
+insert into public.delivery_route_customers (id, route_id, customer_id, orden) values
+  ('rc_centro_1', 'ruta_centro', 'cli_kiosco_centro', 1),
+  ('rc_centro_2', 'ruta_centro', 'cli_almacen_norte', 2)
+on conflict (route_id, customer_id) do update set orden = excluded.orden;
 
 commit;

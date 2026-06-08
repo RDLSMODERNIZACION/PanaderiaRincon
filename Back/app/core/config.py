@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = "Panaderia API"
     app_env: str = "development"
-    app_version: str = "0.1.0"
+    app_version: str = "0.2.0"
     log_level: str = "INFO"
     enable_docs: str = "1"
 
@@ -19,7 +19,12 @@ class Settings(BaseSettings):
     db_pool_timeout: int = 30
     db_connect_timeout: int = 8
 
+    # Seguridad simple para Render/frontend.
+    # API_KEY funciona como llave maestra para admin.
+    # AUTH_REQUIRED=0 permite trabajar libremente durante desarrollo.
+    # AUTH_REQUIRED=1 obliga a mandar X-API-Key o X-User-Id con permisos.
     api_key: str = ""
+    auth_required: str = "0"
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -30,6 +35,10 @@ class Settings(BaseSettings):
     @property
     def docs_enabled(self) -> bool:
         return self.enable_docs == "1"
+
+    @property
+    def auth_enabled(self) -> bool:
+        return self.auth_required == "1"
 
     @property
     def cors_origin_list(self) -> List[str]:

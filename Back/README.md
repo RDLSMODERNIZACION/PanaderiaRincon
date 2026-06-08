@@ -1,259 +1,243 @@
-# Panadería Backend FastAPI
+# Panadería Rincón Backend FastAPI
 
-Backend separado del frontend, armado con una estructura parecida al backend de referencia que pasaste:
+Backend preparado para Render + Supabase/PostgreSQL.
 
-- `app/main.py`: inicializa FastAPI, CORS, routers y pool de DB.
-- `app/db.py`: conexión a PostgreSQL/Supabase con `psycopg_pool`.
-- `app/routes/`: endpoints separados por módulo.
-- `app/repositories/`: CRUD reutilizable para futuras tablas.
-- `app/schemas.py`: modelos de entrada para validar datos.
-- `database/schema.sql`: creación de tablas iniciales.
-- `database/seed_demo.sql`: datos demo opcionales.
-- `database/nueva_tabla_template.sql`: plantilla para nuevas tablas.
-- `scripts/`: utilidades para probar conexión y aplicar schema.
+Incluye:
 
-## 1) Crear entorno
+- Conexión PostgreSQL/Supabase por `DATABASE_URL`.
+- CRUD específico de productos, insumos, recetas, ventas, producción, inventario, personal, energía y dashboard.
+- Módulo completo de reparto: clientes, recorridos, stock del repartidor, visitas, productos entregados, pagos, cuenta corriente, pan viejo/pan rallado y cierre diario.
+- Roles, usuarios y permisos.
+- CRUD genérico seguro por tabla permitida para crear, editar y borrar sin tener que crear un endpoint nuevo cada vez.
+- Auditoría de cambios.
+
+## 1. Variables de entorno
+
+Copiar `.env.example` a `.env` en local.
+
+```env
+DATABASE_URL="postgresql://postgres.PROJECT_REF:TU_PASSWORD@aws-1-us-east-1.pooler.supabase.com:5432/postgres?sslmode=require"
+AUTH_REQUIRED=0
+API_KEY=""
+```
+
+Para Render, cargar `DATABASE_URL` desde Environment.
+
+Durante pruebas puede quedar:
+
+```env
+AUTH_REQUIRED=0
+API_KEY=
+```
+
+Cuando quieras cerrar el backend:
+
+```env
+AUTH_REQUIRED=1
+API_KEY=una_clave_larga
+```
+
+Con `AUTH_REQUIRED=1`, el frontend debe mandar `X-API-Key` o `X-User-Id` de un usuario activo con permisos.
+
+## 2. Crear/actualizar tablas en Supabase
+
+En Supabase:
+
+```text
+SQL Editor > New query
+```
+
+Pegar y ejecutar:
+
+```text
+database/schema.sql
+```
+
+El archivo es idempotente: se puede ejecutar más de una vez. También queda duplicado como:
+
+```text
+database/upgrade_reparto_roles.sql
+```
+
+para usarlo como migración sobre la base que ya venías armando.
+
+## 3. Levantar local
 
 ```bash
 python -m venv .venv
-```
-
-Windows:
-
-```bash
 .venv\Scripts\activate
-```
-
-Linux/Mac:
-
-```bash
-source .venv/bin/activate
-```
-
-## 2) Instalar dependencias
-
-```bash
 pip install -r requirements.txt
-```
-
-## 3) Configurar Supabase
-
-Copiá el archivo de ejemplo:
-
-```bash
-cp .env.example .env
-```
-
-Pegá tu conexión real de Supabase:
-
-```env
-DATABASE_URL="postgresql://postgres.xxxxx:CLAVE@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require"
-```
-
-Recomendado en Supabase: usar **Transaction Pooler**, puerto `6543`, con `sslmode=require`.
-
-## 4) Crear tablas
-
-Opción A: desde Supabase
-
-1. Abrí Supabase.
-2. Entrá al proyecto.
-3. Abrí **SQL Editor**.
-4. Pegá el contenido de `database/schema.sql`.
-5. Ejecutalo.
-
-Opción B: desde terminal
-
-```bash
-python scripts/apply_schema.py
-```
-
-Opcional, cargar datos demo:
-
-```bash
-# Pegá database/seed_demo.sql en Supabase SQL Editor
-```
-
-## 5) Levantar backend
-
-```bash
 uvicorn app.main:app --reload --host 0.0.0.0 --port 4000
 ```
 
-Abrí:
+Probar:
 
 ```text
+http://localhost:4000/health
+http://localhost:4000/health/db
 http://localhost:4000/docs
 ```
 
-Probar conexión:
-
-```text
-GET http://localhost:4000/health/db
-```
-
-## Endpoints iniciales
+## 4. Endpoints principales
 
 ### Health
 
 ```text
-GET /
 GET /health
 GET /health/db
+GET /docs
 ```
 
-### Productos
+### Seguridad / roles
 
 ```text
-GET    /api/productos
-GET    /api/productos/{producto_id}
-POST   /api/productos
-PATCH  /api/productos/{producto_id}
-DELETE /api/productos/{producto_id}
+GET    /api/seguridad/me
+GET    /api/seguridad/roles
+GET    /api/seguridad/roles/{role_id}
+POST   /api/seguridad/roles
+PATCH  /api/seguridad/roles/{role_id}
+DELETE /api/seguridad/roles/{role_id}
+GET    /api/seguridad/permisos
+POST   /api/seguridad/permisos
+POST   /api/seguridad/roles/{role_id}/permisos/{permission_id}
+DELETE /api/seguridad/roles/{role_id}/permisos/{permission_id}
+GET    /api/seguridad/usuarios
+POST   /api/seguridad/usuarios
+PATCH  /api/seguridad/usuarios/{user_id}
+DELETE /api/seguridad/usuarios/{user_id}
+```
+
+### CRUD genérico por tabla
+
+```text
+GET    /api/admin/crud/tables
+GET    /api/admin/crud/{table_name}
+GET    /api/admin/crud/{table_name}/{row_id}
+POST   /api/admin/crud/{table_name}
+PATCH  /api/admin/crud/{table_name}/{row_id}
+DELETE /api/admin/crud/{table_name}/{row_id}
 ```
 
 Ejemplo:
 
-```json
-{
-  "nombre": "Pan francés",
-  "categoria": "Panadería",
-  "unidadVenta": "kg",
-  "precioVenta": 2200,
-  "costoUnitario": 980,
-  "activo": true
-}
+```bash
+curl -X POST https://TU_BACKEND.onrender.com/api/admin/crud/customers \
+  -H "Content-Type: application/json" \
+  -d '{"nombre":"Autoservicio Centro","direccion":"Av. Principal 123"}'
 ```
 
-### Insumos
+Tablas habilitadas en CRUD genérico:
 
 ```text
-GET    /api/insumos
-GET    /api/insumos?bajo_stock=true
-POST   /api/insumos
-PATCH  /api/insumos/{insumo_id}
-DELETE /api/insumos/{insumo_id}
+products
+supplies
+recipes
+recipe_items
+tickets
+ticket_items
+production_batches
+inventory_movements
+employees
+employee_shifts
+energy_records
+integration_connections
+app_roles
+app_permissions
+app_role_permissions
+app_users
+customers
+product_prices
+delivery_routes
+delivery_route_customers
+delivery_runs
+delivery_run_stock
+delivery_visits
+delivery_visit_items
+payments
+customer_account_movements
+breadcrumb_account_movements
+delivery_run_closures
+audit_log
 ```
 
-### Recetas
+### Reparto
 
 ```text
-GET    /api/recetas
-GET    /api/recetas/{receta_id}
-POST   /api/recetas
-PATCH  /api/recetas/{receta_id}
-DELETE /api/recetas/{receta_id}
+GET    /api/reparto/clientes
+POST   /api/reparto/clientes
+PATCH  /api/reparto/clientes/{customer_id}
+DELETE /api/reparto/clientes/{customer_id}
+
+GET    /api/reparto/precios
+POST   /api/reparto/precios
+PATCH  /api/reparto/precios/{precio_id}
+DELETE /api/reparto/precios/{precio_id}
+
+GET    /api/reparto/recorridos
+POST   /api/reparto/recorridos
+PATCH  /api/reparto/recorridos/{route_id}
+DELETE /api/reparto/recorridos/{route_id}
+GET    /api/reparto/recorridos/{route_id}/clientes
+POST   /api/reparto/recorridos/{route_id}/clientes
+DELETE /api/reparto/recorridos/clientes/{route_customer_id}
+
+GET    /api/reparto/repartos
+GET    /api/reparto/repartos/{run_id}
+POST   /api/reparto/repartos
+PATCH  /api/reparto/repartos/{run_id}
+POST   /api/reparto/repartos/{run_id}/iniciar
+GET    /api/reparto/repartos/{run_id}/stock
+POST   /api/reparto/repartos/{run_id}/stock
+PATCH  /api/reparto/stock/{stock_id}
+
+GET    /api/reparto/visitas
+GET    /api/reparto/visitas/{visit_id}
+POST   /api/reparto/visitas
+PATCH  /api/reparto/visitas/{visit_id}
+POST   /api/reparto/visitas/{visit_id}/items
+PATCH  /api/reparto/items/{item_id}
+DELETE /api/reparto/items/{item_id}
+POST   /api/reparto/visitas/{visit_id}/pagos
+PATCH  /api/reparto/pagos/{payment_id}
+POST   /api/reparto/visitas/{visit_id}/pan-rallado
+POST   /api/reparto/visitas/{visit_id}/cerrar
+
+GET    /api/reparto/clientes/{customer_id}/cuenta
+POST   /api/reparto/clientes/{customer_id}/cuenta/ajuste
+GET    /api/reparto/clientes/{customer_id}/pan-rallado
+POST   /api/reparto/clientes/{customer_id}/pan-rallado/ajuste
+
+POST   /api/reparto/repartos/{run_id}/cerrar
+GET    /api/reparto/repartos/{run_id}/resumen
+GET    /api/reparto/reportes/deudas-clientes
+GET    /api/reparto/reportes/pan-rallado-pendiente
 ```
 
-### Ventas
+## 5. Flujo recomendado de reparto
 
-```text
-GET    /api/ventas
-GET    /api/ventas?desde=2026-06-01&hasta=2026-06-30
-GET    /api/ventas/{ticket_id}
-POST   /api/ventas
-DELETE /api/ventas/{ticket_id}
-```
+1. Administración crea productos y precios.
+2. Administración crea clientes/comercios.
+3. Administración crea recorridos y asigna clientes.
+4. Se crea un `delivery_run` del día con stock inicial.
+5. El repartidor abre una `delivery_visit` por comercio.
+6. Carga items vendidos y pagos.
+7. Si retira pan viejo o entrega pan rallado, carga movimiento en `breadcrumb_account_movements`.
+8. Cierra la visita. El backend genera movimientos de cuenta corriente:
+   - venta = debe
+   - pagos confirmados = haber
+   - pagos pendientes QR/transferencia no descuentan deuda hasta confirmar
+9. Al final se cierra el reparto. El backend compara:
+   - stock cargado
+   - mercadería entregada
+   - stock esperado
+   - stock real devuelto
+   - efectivo esperado
+   - efectivo real
+   - diferencias
 
-Ejemplo:
+## 6. Notas de seguridad
 
-```json
-{
-  "canal": "Mostrador",
-  "medioPago": "Efectivo",
-  "descuento": 0,
-  "items": [
-    {
-      "productId": "pan-frances",
-      "cantidad": 2,
-      "precioUnitario": 2200
-    }
-  ]
-}
-```
-
-### Producción
-
-```text
-GET    /api/produccion
-POST   /api/produccion
-PATCH  /api/produccion/{lote_id}
-DELETE /api/produccion/{lote_id}
-```
-
-### Inventario
-
-```text
-GET    /api/inventario/resumen
-GET    /api/inventario/movimientos
-POST   /api/inventario/movimientos
-PATCH  /api/inventario/movimientos/{movimiento_id}
-DELETE /api/inventario/movimientos/{movimiento_id}
-```
-
-### Personal
-
-```text
-GET    /api/personal/empleados
-POST   /api/personal/empleados
-PATCH  /api/personal/empleados/{empleado_id}
-DELETE /api/personal/empleados/{empleado_id}
-GET    /api/personal/turnos
-POST   /api/personal/turnos
-DELETE /api/personal/turnos/{turno_id}
-```
-
-### Energía
-
-```text
-GET    /api/energia/registros
-POST   /api/energia/registros
-PATCH  /api/energia/registros/{registro_id}
-DELETE /api/energia/registros/{registro_id}
-```
-
-### Dashboard
-
-```text
-GET /api/dashboard/resumen
-```
-
-### Admin schema
-
-Sirve para ver qué tablas y columnas existen en Supabase. Es útil cuando empecemos a sumar más tablas.
-
-```text
-GET /api/admin/schema/tables
-GET /api/admin/schema/tables/{table_name}/columns
-```
-
-## Seguridad simple
-
-Por defecto `API_KEY` está vacío y no bloquea los `POST/PATCH/DELETE`.
-
-Cuando quieras proteger escritura:
-
-```env
-API_KEY="una-clave-larga"
-```
-
-Y desde el frontend mandás:
-
-```text
-X-API-Key: una-clave-larga
-```
-
-## Cómo agregar una tabla nueva después
-
-1. Copiá `database/nueva_tabla_template.sql`.
-2. Cambiá `nombre_tabla` y las columnas.
-3. Ejecutá el SQL en Supabase.
-4. Copiá `app/routes/_template.py.example` a `app/routes/mi_tabla.py`.
-5. Ajustá `TableConfig` con el nombre real de tabla y columnas permitidas.
-6. Importá el router en `app/main.py` y agregá:
-
-```python
-app.include_router(mi_tabla.router)
-```
-
-Con eso queda conectado al mismo pool de Supabase y con estructura lista para crecer.
+- No subir `.env` a GitHub.
+- No poner `DATABASE_URL` en código.
+- Cambiar la contraseña de Supabase después de las pruebas si fue compartida.
+- Para producción real, configurar `API_KEY` y `AUTH_REQUIRED=1`.
