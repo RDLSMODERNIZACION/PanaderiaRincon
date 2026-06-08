@@ -1,11 +1,10 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { PackagePlus, Save, Trash2 } from "lucide-react"
+import { Minus, PackageCheck, Plus, RotateCcw, Save } from "lucide-react"
 import Button from "@/components/ui/Button"
 import Input from "@/components/ui/Input"
 import Modal from "@/components/ui/Modal"
-import Select from "@/components/ui/Select"
 import { LoadingBlock } from "@/components/data/AsyncState"
 import { apiDelete, apiGet, apiPatch, apiPost, type ApiSession, unwrapData } from "@/lib/api"
 import type { RowData } from "@/features/crud/types"
@@ -40,22 +39,8 @@ function loadedQuantity(row: RowData) {
   return Number.isFinite(n) ? n : 0
 }
 
-function returnedQuantity(row: RowData) {
-  const raw = row.cantidad_devuelta_real ?? row.cantidadDevueltaReal ?? 0
-  const n = Number(raw)
-  return Number.isFinite(n) ? n : 0
-}
-
-function expectedQuantity(row: RowData) {
-  const raw = row.cantidad_esperada ?? row.cantidadEsperada ?? loadedQuantity(row)
-  const n = Number(raw)
-  return Number.isFinite(n) ? n : loadedQuantity(row)
-}
-
-function differenceQuantity(row: RowData) {
-  const raw = row.diferencia ?? 0
-  const n = Number(raw)
-  return Number.isFinite(n) ? n : 0
+function productUnit(row: RowData) {
+  return String(row.unidad_venta || row.unidadVenta || "")
 }
 
 function formatDate(value: unknown) {
@@ -72,6 +57,26 @@ function formatDate(value: unknown) {
   return d.toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" })
 }
 
+function numberFromInput(value: string) {
+  if (value.trim() === "") return 0
+  const n = Number(value)
+  return Number.isFinite(n) ? n : NaN
+}
+
+function normalizeNumber(value: number) {
+  if (!Number.isFinite(value)) return "0"
+  if (value < 0) return "0"
+  return String(Number(value.toFixed(2)))
+}
+
+function stepForProduct(product: RowData) {
+  const unit = productUnit(product).toLowerCase()
+
+  if (unit === "kg") return 0.5
+
+  return 1
+}
+
 export default function RunStockModal({
   open,
   run,
@@ -81,14 +86,45 @@ export default function RunStockModal({
 }: Props) {
   const [items, setItems] = useState<StockItem[]>([])
   const [products, setProducts] = useState<RowData[]>([])
-  const [selectedProductId, setSelectedProductId] = useState("")
-  const [quantity, setQuantity] = useState("")
-  const [draftQuantities, setDraftQuantities] = useState<Record<string, string>>({})
+  const [quantities, setQuantities] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const runId = run?.id ? String(run.id) : ""
+
+  const stockByProductId = useMemo(() => {
+    const map = new Map<string, StockItem>()
+
+    for (const item of items) {
+      const productId = productIdOf(item)
+      if (productId) map.set(productId, item)
+    }
+
+    return map
+  }, [items])
+
+  const activeProducts = useMemo(() => {
+    return products
+      .filter(product => product.activo !== false)
+      .sort((a, b) => rowLabel(a).localeCompare(rowLabel(b)))
+  }, [products])
+
+  const totalLoaded = useMemo(() => {
+    return activeProducts.reduce((sum, product) => {
+      const productId = String(product.id)
+      const cantidad = numberFromInput(quantities[productId] || "0")
+      return sum + (Number.isFinite(cantidad) && cantidad > 0 ? cantidad : 0)
+    }, 0)
+  }, [activeProducts, quantities])
+
+  const assignedCount = useMemo(() => {
+    return activeProducts.filter(product => {
+      const productId = String(product.id)
+      const cantidad = numberFromInput(quantities[productId] || "0")
+      return Number.isFinite(cantidad) && cantidad > 0
+    }).length
+  }, [activeProducts, quantities])
 
   const loadDetails = useCallback(async () => {
     if (!session || !runId) return
@@ -112,16 +148,21 @@ export default function RunStockModal({
           ...item,
           product: productById.get(productIdOf(item))
         }))
-        .sort((a, b) => rowLabel(a.product || a).localeCompare(rowLabel(b.product || b)))
 
-      const nextDrafts: Record<string, string> = {}
-      for (const item of runItems) {
-        if (item.id) nextDrafts[String(item.id)] = String(loadedQuantity(item))
+      const nextQuantities: Record<string, string> = {}
+
+      for (const product of productRows) {
+        nextQuantities[String(product.id)] = "0"
       }
 
-      setProducts(productRows.filter(product => product.activo !== false))
+      for (const item of runItems) {
+        const productId = productIdOf(item)
+        if (productId) nextQuantities[productId] = String(loadedQuantity(item))
+      }
+
+      setProducts(productRows)
       setItems(runItems)
-      setDraftQuantities(nextDrafts)
+      setQuantities(nextQuantities)
     } catch (exc: any) {
       setError(exc?.message || "No se pudo cargar la mercadería del reparto")
     } finally {
@@ -130,104 +171,84 @@ export default function RunStockModal({
   }, [session, runId])
 
   useEffect(() => {
-    if (open) {
-      setSelectedProductId("")
-      setQuantity("")
-      loadDetails()
-    }
+    if (open) loadDetails()
   }, [open, loadDetails])
-
-  const usedProductIds = useMemo(() => {
-    return new Set(items.map(item => productIdOf(item)).filter(Boolean))
-  }, [items])
-
-  const availableProducts = useMemo(() => {
-    return products.filter(product => !usedProductIds.has(String(product.id)))
-  }, [products, usedProductIds])
-
-  const totalLoaded = useMemo(() => {
-    return items.reduce((sum, item) => sum + loadedQuantity(item), 0)
-  }, [items])
 
   async function refreshAfterChange() {
     await loadDetails()
     onChanged?.()
   }
 
-  async function addProduct() {
-    if (!session || !runId || !selectedProductId) return
-
-    const cantidad = Number(quantity)
-
-    if (!Number.isFinite(cantidad) || cantidad <= 0) {
-      setError("Ingresá una cantidad válida.")
-      return
-    }
-
-    setSaving(true)
-    setError(null)
-
-    try {
-      await apiPost(session, "/api/admin/crud/delivery_run_stock", {
-        delivery_run_id: runId,
-        product_id: selectedProductId,
-        cantidad_cargada: cantidad,
-        cantidad_devuelta_real: 0,
-        cantidad_esperada: cantidad,
-        diferencia: 0
-      })
-
-      setSelectedProductId("")
-      setQuantity("")
-      await refreshAfterChange()
-    } catch (exc: any) {
-      setError(exc?.message || "No se pudo agregar la mercadería")
-    } finally {
-      setSaving(false)
-    }
+  function setProductQuantity(productId: string, value: string) {
+    setQuantities(current => ({
+      ...current,
+      [productId]: value
+    }))
   }
 
-  async function updateQuantity(item: StockItem) {
-    if (!session || !item.id) return
+  function changeProductQuantity(product: RowData, delta: number) {
+    const productId = String(product.id)
+    const current = numberFromInput(quantities[productId] || "0")
+    const safeCurrent = Number.isFinite(current) ? current : 0
+    const next = safeCurrent + delta
 
-    const cantidad = Number(draftQuantities[String(item.id)] ?? "")
-
-    if (!Number.isFinite(cantidad) || cantidad < 0) {
-      setError("Ingresá una cantidad válida.")
-      return
-    }
-
-    setSaving(true)
-    setError(null)
-
-    try {
-      await apiPatch(session, `/api/admin/crud/delivery_run_stock/${encodeURIComponent(String(item.id))}`, {
-        cantidad_cargada: cantidad,
-        cantidad_esperada: cantidad
-      })
-
-      await refreshAfterChange()
-    } catch (exc: any) {
-      setError(exc?.message || "No se pudo actualizar la cantidad")
-    } finally {
-      setSaving(false)
-    }
+    setProductQuantity(productId, normalizeNumber(next))
   }
 
-  async function removeItem(item: StockItem) {
-    if (!session || !item.id) return
+  function resetAllToZero() {
+    const next: Record<string, string> = {}
 
-    const label = item.product ? rowLabel(item.product) : "este producto"
-    if (!window.confirm(`¿Quitar ${label} de la mercadería del reparto?`)) return
+    for (const product of activeProducts) {
+      next[String(product.id)] = "0"
+    }
+
+    setQuantities(next)
+  }
+
+  async function saveAll() {
+    if (!session || !runId) return
 
     setSaving(true)
     setError(null)
 
     try {
-      await apiDelete(session, `/api/admin/crud/delivery_run_stock/${encodeURIComponent(String(item.id))}`)
+      for (const product of activeProducts) {
+        const productId = String(product.id)
+        const existing = stockByProductId.get(productId)
+        const cantidad = numberFromInput(quantities[productId] || "0")
+
+        if (!Number.isFinite(cantidad) || cantidad < 0) {
+          throw new Error(`Cantidad inválida en ${rowLabel(product)}.`)
+        }
+
+        if (cantidad > 0 && existing?.id) {
+          await apiPatch(session, `/api/admin/crud/delivery_run_stock/${encodeURIComponent(String(existing.id))}`, {
+            cantidad_cargada: cantidad,
+            cantidad_esperada: cantidad,
+            cantidad_devuelta_real: 0,
+            diferencia: 0
+          })
+        }
+
+        if (cantidad > 0 && !existing?.id) {
+          await apiPost(session, "/api/admin/crud/delivery_run_stock", {
+            delivery_run_id: runId,
+            product_id: productId,
+            cantidad_cargada: cantidad,
+            cantidad_devuelta_real: 0,
+            cantidad_esperada: cantidad,
+            diferencia: 0
+          })
+        }
+
+        if (cantidad === 0 && existing?.id) {
+          await apiDelete(session, `/api/admin/crud/delivery_run_stock/${encodeURIComponent(String(existing.id))}`)
+        }
+      }
+
       await refreshAfterChange()
     } catch (exc: any) {
-      setError(exc?.message || "No se pudo quitar la mercadería")
+      setError(exc?.message || "No se pudo guardar la mercadería")
     } finally {
       setSaving(false)
     }
@@ -241,10 +262,12 @@ export default function RunStockModal({
             <div className="text-xs font-medium text-zinc-500">Fecha</div>
             <div className="mt-1 font-semibold text-zinc-900">{formatDate(run?.fecha || run?.date)}</div>
           </div>
+
           <div>
             <div className="text-xs font-medium text-zinc-500">Estado</div>
             <div className="mt-1 font-semibold text-zinc-900">{String(run?.estado || "-")}</div>
           </div>
+
           <div>
             <div className="text-xs font-medium text-zinc-500">Total cargado</div>
             <div className="mt-1 font-semibold text-zinc-900">{totalLoaded}</div>
@@ -262,110 +285,94 @@ export default function RunStockModal({
         {!loading ? (
           <>
             <div className="rounded-xl border border-zinc-200">
-              <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-100 px-4 py-3">
                 <div>
-                  <div className="text-sm font-semibold text-zinc-900">Mercadería cargada</div>
-                  <div className="text-xs text-zinc-500">{items.length} producto(s) asignados al reparto</div>
+                  <div className="text-sm font-semibold text-zinc-900">Carga de mercadería</div>
+                  <div className="text-xs text-zinc-500">
+                    {assignedCount} producto(s) cargados. Los productos en cero no se asignan.
+                  </div>
                 </div>
-                <PackagePlus className="h-5 w-5 text-zinc-400" />
+
+                <PackageCheck className="h-5 w-5 text-zinc-400" />
               </div>
 
-              {items.length === 0 ? (
+              {activeProducts.length === 0 ? (
                 <div className="px-4 py-6 text-sm text-zinc-500">
-                  Todavía no se cargó mercadería para este reparto.
+                  No hay productos activos cargados.
                 </div>
               ) : (
-                <div className="max-h-[280px] overflow-auto">
-                  <table className="w-full text-left text-sm">
-                    <thead className="border-b border-zinc-100 bg-zinc-50 text-xs font-medium text-zinc-500">
-                      <tr>
-                        <th className="px-4 py-2">Producto</th>
-                        <th className="px-4 py-2">Cargado</th>
-                        <th className="px-4 py-2">Devuelto</th>
-                        <th className="px-4 py-2">Esperado</th>
-                        <th className="px-4 py-2">Diferencia</th>
-                        <th className="px-4 py-2 text-right">Acciones</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-100">
-                      {items.map(item => (
-                        <tr key={String(item.id)}>
-                          <td className="px-4 py-2 font-medium text-zinc-900">
-                            {item.product ? rowLabel(item.product) : productIdOf(item)}
-                          </td>
-                          <td className="px-4 py-2">
+                <div className="max-h-[460px] overflow-auto">
+                  <div className="divide-y divide-zinc-100">
+                    {activeProducts.map(product => {
+                      const productId = String(product.id)
+                      const cantidad = quantities[productId] ?? "0"
+                      const step = stepForProduct(product)
+
+                      return (
+                        <div key={productId} className="grid grid-cols-[1fr_auto] gap-3 px-4 py-3">
+                          <div className="min-w-0">
+                            <div className="font-medium text-zinc-900">{rowLabel(product)}</div>
+                            <div className="mt-1 text-xs text-zinc-500">
+                              Unidad: {productUnit(product) || "-"}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              disabled={saving}
+                              onClick={() => changeProductQuantity(product, -step)}
+                              className="grid h-11 w-11 place-items-center rounded-xl border border-zinc-200 bg-white text-zinc-900 shadow-sm hover:bg-zinc-50 disabled:opacity-40"
+                              aria-label={`Restar ${rowLabel(product)}`}
+                            >
+                              <Minus className="h-5 w-5" />
+                            </button>
+
                             <Input
                               type="number"
                               step="any"
-                              value={draftQuantities[String(item.id)] ?? ""}
-                              onChange={e => setDraftQuantities(v => ({ ...v, [String(item.id)]: e.target.value }))}
-                              className="h-9 w-28"
+                              min="0"
+                              value={cantidad}
+                              onChange={e => setProductQuantity(productId, e.target.value)}
+                              className="h-11 w-24 text-center text-base font-semibold"
                             />
-                          </td>
-                          <td className="px-4 py-2 text-zinc-600">{returnedQuantity(item)}</td>
-                          <td className="px-4 py-2 text-zinc-600">{expectedQuantity(item)}</td>
-                          <td className="px-4 py-2 text-zinc-600">{differenceQuantity(item)}</td>
-                          <td className="px-4 py-2">
-                            <div className="flex justify-end gap-1">
-                              <button
-                                type="button"
-                                className="rounded-lg p-2 text-zinc-700 hover:bg-zinc-100 disabled:opacity-40"
-                                disabled={saving}
-                                onClick={() => updateQuantity(item)}
-                                aria-label="Guardar cantidad"
-                              >
-                                <Save className="h-4 w-4" />
-                              </button>
 
-                              <button
-                                type="button"
-                                className="rounded-lg p-2 text-red-600 hover:bg-red-50 disabled:opacity-40"
-                                disabled={saving}
-                                onClick={() => removeItem(item)}
-                                aria-label="Quitar"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                            <button
+                              type="button"
+                              disabled={saving}
+                              onClick={() => changeProductQuantity(product, step)}
+                              className="grid h-11 w-11 place-items-center rounded-xl bg-zinc-900 text-white shadow-sm hover:bg-zinc-800 disabled:opacity-40"
+                              aria-label={`Sumar ${rowLabel(product)}`}
+                            >
+                              <Plus className="h-5 w-5" />
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
                 </div>
               )}
             </div>
 
-            <div className="space-y-3 rounded-xl border border-zinc-200 p-4">
-              <div>
-                <div className="text-sm font-semibold text-zinc-900">Agregar producto al reparto</div>
-                <div className="text-xs text-zinc-500">
-                  Esta es la mercadería que administración le entrega al repartidor antes de salir.
-                </div>
-              </div>
+            <div className="flex flex-wrap justify-end gap-2 border-t border-zinc-100 pt-4">
+              <Button type="button" variant="secondary" disabled={saving} onClick={resetAllToZero}>
+                <RotateCcw className="mr-2 h-4 w-4" /> Poner todo en cero
+              </Button>
 
-              <div className="grid gap-3 md:grid-cols-[1fr_160px_auto]">
-                <Select value={selectedProductId} onChange={e => setSelectedProductId(e.target.value)}>
-                  <option value="">Seleccionar producto...</option>
-                  {availableProducts.map(product => (
-                    <option key={String(product.id)} value={String(product.id)}>
-                      {rowLabel(product)}
-                    </option>
-                  ))}
-                </Select>
+              <Button type="button" disabled={saving || activeProducts.length === 0} onClick={saveAll}>
+                {saving ? (
+                  "Guardando..."
+                ) : (
+                  <>
+                    <Save className="mr-2 h-4 w-4" /> Guardar mercadería
+                  </>
+                )}
+              </Button>
+            </div>
 
-                <Input
-                  type="number"
-                  step="any"
-                  value={quantity}
-                  onChange={e => setQuantity(e.target.value)}
-                  placeholder="Cantidad"
-                />
-
-                <Button type="button" disabled={saving || !selectedProductId || !quantity} onClick={addProduct}>
-                  <PackagePlus className="mr-2 h-4 w-4" /> Agregar
-                </Button>
-              </div>
+            <div className="rounded-xl bg-zinc-50 px-3 py-2 text-xs text-zinc-500">
+              Administración carga únicamente la mercadería que sale con el repartidor. La devolución y diferencia se calculan después en la rendición.
             </div>
           </>
         ) : null}

@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from app.core.config import get_settings
 from app.db import close_pool, get_pool
 from app.routes import admin_crud, admin_schema, dashboard, delivery, employees, energy, health, inventory, production, products, recipes, sales, security, supplies
+from app.routes import repartidor
 
 settings = get_settings()
 
@@ -63,6 +64,7 @@ app.include_router(delivery.router)
 app.include_router(dashboard.router)
 app.include_router(admin_schema.router)
 app.include_router(admin_crud.router)
+app.include_router(repartidor.router)
 
 
 @app.on_event("startup")
