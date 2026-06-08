@@ -1,7 +1,6 @@
 export type ApiSession = {
   apiBaseUrl?: string
   apiUrl?: string
-  apiKey?: string
   userId?: string
 }
 
@@ -14,12 +13,15 @@ export type ApiPayload<T = any> = {
   [key: string]: any
 }
 
-export const DEFAULT_API_URL = process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL || "https://panaderia-backend-vrfl.onrender.com"
-export const DEFAULT_API_KEY = process.env.NEXT_PUBLIC_DEFAULT_API_KEY || process.env.NEXT_PUBLIC_API_KEY || ""
+export const DEFAULT_API_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  "https://panaderia-backend-vrfl.onrender.com"
 
 export class ApiError extends Error {
   status: number
   payload?: unknown
+
   constructor(message: string, status: number, payload?: unknown) {
     super(message)
     this.name = "ApiError"
@@ -37,42 +39,66 @@ function baseUrl(session: ApiSession) {
 }
 
 function headersFor(session: ApiSession, hasBody = false): HeadersInit {
-  const headers: Record<string, string> = { Accept: "application/json" }
+  const headers: Record<string, string> = {
+    Accept: "application/json"
+  }
+
   if (hasBody) headers["Content-Type"] = "application/json"
-  if (session.apiKey) headers["X-API-Key"] = session.apiKey
   if (session.userId) headers["X-User-Id"] = session.userId
+
   return headers
 }
 
 export function buildQuery(params: Record<string, unknown>) {
   const qs = new URLSearchParams()
+
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null || value === "") continue
     qs.set(key, String(value))
   }
+
   const text = qs.toString()
   return text ? `?${text}` : ""
 }
 
 async function request<T = any>(session: ApiSession, path: string, init: RequestInit = {}): Promise<T> {
   const body = init.body
+
   const res = await fetch(`${baseUrl(session)}${path}`, {
     ...init,
-    headers: { ...headersFor(session, body !== undefined), ...(init.headers || {}) },
+    headers: {
+      ...headersFor(session, body !== undefined),
+      ...(init.headers || {})
+    },
     cache: "no-store"
   })
+
   const text = await res.text()
   let payload: any = null
+
   if (text) {
-    try { payload = JSON.parse(text) } catch { payload = text }
+    try {
+      payload = JSON.parse(text)
+    } catch {
+      payload = text
+    }
   }
+
   if (!res.ok) {
-    const msg = payload?.detail || payload?.error || payload?.message || (typeof payload === "string" ? payload : "") || `Error HTTP ${res.status}`
+    const msg =
+      payload?.detail ||
+      payload?.error ||
+      payload?.message ||
+      (typeof payload === "string" ? payload : "") ||
+      `Error HTTP ${res.status}`
+
     throw new ApiError(String(msg), res.status, payload)
   }
+
   if (payload?.ok === false) {
     throw new ApiError(String(payload.error || payload.detail || "Error del backend"), res.status, payload)
   }
+
   return payload as T
 }
 
@@ -81,31 +107,52 @@ export function apiGet<T = any>(session: ApiSession, path: string) {
 }
 
 export function apiPost<T = any>(session: ApiSession, path: string, payload?: unknown) {
-  return request<T>(session, path, { method: "POST", body: JSON.stringify(payload ?? {}) })
+  return request<T>(session, path, {
+    method: "POST",
+    body: JSON.stringify(payload ?? {})
+  })
 }
 
 export function apiPatch<T = any>(session: ApiSession, path: string, payload?: unknown) {
-  return request<T>(session, path, { method: "PATCH", body: JSON.stringify(payload ?? {}) })
+  return request<T>(session, path, {
+    method: "PATCH",
+    body: JSON.stringify(payload ?? {})
+  })
 }
 
 export function apiDelete<T = any>(session: ApiSession, path: string) {
-  return request<T>(session, path, { method: "DELETE" })
+  return request<T>(session, path, {
+    method: "DELETE"
+  })
 }
 
 export function unwrapData<T>(payload: ApiPayload<T> | T): T {
-  if (payload && typeof payload === "object" && "data" in payload) return (payload as ApiPayload<T>).data as T
+  if (payload && typeof payload === "object" && "data" in payload) {
+    return (payload as ApiPayload<T>).data as T
+  }
+
   return payload as T
 }
 
 export function getDefaultSession(): ApiSession {
   return {
     apiBaseUrl: normalizeApiUrl(DEFAULT_API_URL),
-    apiUrl: normalizeApiUrl(DEFAULT_API_URL),
-    apiKey: DEFAULT_API_KEY || undefined
+    apiUrl: normalizeApiUrl(DEFAULT_API_URL)
   }
 }
 
-export function getRows(session: ApiSession, table: string, params?: { q?: string; limit?: number; offset?: number; includeInactive?: boolean; orderBy?: string; desc?: boolean }) {
+export function getRows(
+  session: ApiSession,
+  table: string,
+  params?: {
+    q?: string
+    limit?: number
+    offset?: number
+    includeInactive?: boolean
+    orderBy?: string
+    desc?: boolean
+  }
+) {
   const query = buildQuery({
     q: params?.q,
     limit: params?.limit ?? 200,
@@ -114,17 +161,27 @@ export function getRows(session: ApiSession, table: string, params?: { q?: strin
     order_by: params?.orderBy,
     desc: params?.desc
   })
+
   return apiGet<ApiPayload<any[]>>(session, `/api/admin/crud/${table}${query}`).then(unwrapData<any[]>)
 }
 
 export function createRow(session: ApiSession, table: string, payload: Record<string, unknown>) {
-  return apiPost<ApiPayload<Record<string, unknown>>>(session, `/api/admin/crud/${table}`, payload).then(unwrapData<Record<string, unknown>>)
+  return apiPost<ApiPayload<Record<string, unknown>>>(session, `/api/admin/crud/${table}`, payload).then(
+    unwrapData<Record<string, unknown>>
+  )
 }
 
 export function updateRow(session: ApiSession, table: string, rowId: string, payload: Record<string, unknown>) {
-  return apiPatch<ApiPayload<Record<string, unknown>>>(session, `/api/admin/crud/${table}/${encodeURIComponent(rowId)}`, payload).then(unwrapData<Record<string, unknown>>)
+  return apiPatch<ApiPayload<Record<string, unknown>>>(
+    session,
+    `/api/admin/crud/${table}/${encodeURIComponent(rowId)}`,
+    payload
+  ).then(unwrapData<Record<string, unknown>>)
 }
 
 export function deleteRow(session: ApiSession, table: string, rowId: string, hard = false) {
-  return apiDelete<ApiPayload<{ message?: string }>>(session, `/api/admin/crud/${table}/${encodeURIComponent(rowId)}?hard=${String(hard)}`).then(unwrapData<{ message?: string }>)
+  return apiDelete<ApiPayload<{ message?: string }>>(
+    session,
+    `/api/admin/crud/${table}/${encodeURIComponent(rowId)}?hard=${String(hard)}`
+  ).then(unwrapData<{ message?: string }>)
 }

@@ -40,13 +40,31 @@ def _public_user(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _default_role_id() -> str | None:
-    row = fetch_one("select id from public.app_roles where id = %s limit 1", ["role_admin"])
+def _default_role_id() -> str:
+    row = fetch_one("select id from public.app_roles where id = %s limit 1", ["role_consulta"])
     if row:
         return row["id"]
 
-    row = fetch_one("select id from public.app_roles where activo = true order by nombre asc limit 1")
-    return row["id"] if row else None
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            insert into public.app_roles (id, nombre, descripcion, activo)
+            values (%s, %s, %s, true)
+            on conflict (id) do update set
+              nombre = excluded.nombre,
+              descripcion = excluded.descripcion,
+              activo = true
+            returning id
+            """,
+            [
+                "role_consulta",
+                "Consulta",
+                "Usuario nuevo con acceso mínimo hasta que un administrador le asigne un rol.",
+            ],
+        )
+        role = cur.fetchone()
+
+    return role["id"]
 
 
 @router.post("/login")
