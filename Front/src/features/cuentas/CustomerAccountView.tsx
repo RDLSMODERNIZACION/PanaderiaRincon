@@ -15,11 +15,10 @@ import type { RowData } from "@/features/crud/types"
 
 type DebtLot = {
   fecha: string
-  descripcion: string
   amount: number
 }
 
-type CustomerDebtRow = {
+type CustomerAccountRow = {
   customerId: string
   cliente: string
   direccion: string
@@ -182,7 +181,7 @@ function parseAmount(value: string) {
   return Number.isFinite(n) ? n : 0
 }
 
-function buildCustomerDebt(customer: RowData, movements: RowData[]): CustomerDebtRow {
+function buildCustomerAccount(customer: RowData, movements: RowData[]): CustomerAccountRow {
   const sorted = [...movements].sort((a, b) => dateValue(getFecha(a)) - dateValue(getFecha(b)))
 
   const lots: DebtLot[] = []
@@ -224,7 +223,6 @@ function buildCustomerDebt(customer: RowData, movements: RowData[]): CustomerDeb
       if (debe > 0) {
         lots.push({
           fecha,
-          descripcion: getDescripcion(movement),
           amount: debe
         })
       }
@@ -308,7 +306,7 @@ function buildMovementDetails(movements: RowData[]) {
   return details.reverse()
 }
 
-export default function CustomerDebtReportView() {
+export default function CustomerAccountView() {
   const { session } = useAuth()
 
   const [customers, setCustomers] = useState<RowData[]>([])
@@ -320,7 +318,7 @@ export default function CustomerDebtReportView() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const [paymentCustomer, setPaymentCustomer] = useState<CustomerDebtRow | null>(null)
+  const [paymentCustomer, setPaymentCustomer] = useState<CustomerAccountRow | null>(null)
   const [paymentAmount, setPaymentAmount] = useState("")
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("efectivo")
   const [paymentReference, setPaymentReference] = useState("")
@@ -343,7 +341,7 @@ export default function CustomerDebtReportView() {
       setCustomers(unwrapData<RowData[]>(customersPayload) || [])
       setMovements(unwrapData<RowData[]>(movementsPayload) || [])
     } catch (exc: any) {
-      setError(exc?.message || "No se pudo cargar el reporte")
+      setError(exc?.message || "No se pudo cargar la cuenta corriente")
     } finally {
       setLoading(false)
     }
@@ -370,9 +368,9 @@ export default function CustomerDebtReportView() {
     return map
   }, [movements])
 
-  const debtRows = useMemo(() => {
+  const accountRows = useMemo(() => {
     return customers
-      .map(customer => buildCustomerDebt(customer, movementsByCustomer.get(getId(customer)) || []))
+      .map(customer => buildCustomerAccount(customer, movementsByCustomer.get(getId(customer)) || []))
       .sort((a, b) => {
         if (b.deuda !== a.deuda) return b.deuda - a.deuda
         return b.diasDeuda - a.diasDeuda
@@ -382,7 +380,7 @@ export default function CustomerDebtReportView() {
   const filteredRows = useMemo(() => {
     const search = q.trim().toLowerCase()
 
-    return debtRows.filter(row => {
+    return accountRows.filter(row => {
       if (estado === "con_deuda" && row.deuda <= 0) return false
       if (estado === "sin_deuda" && row.deuda > 0) return false
       if (estado === "saldo_favor" && row.saldoFavor <= 0) return false
@@ -407,12 +405,12 @@ export default function CustomerDebtReportView() {
 
       return text.includes(search)
     })
-  }, [debtRows, q, estado, antiguedad])
+  }, [accountRows, q, estado, antiguedad])
 
   const selectedCustomer = useMemo(() => {
     if (!selectedCustomerId) return null
-    return debtRows.find(row => row.customerId === selectedCustomerId) || null
-  }, [debtRows, selectedCustomerId])
+    return accountRows.find(row => row.customerId === selectedCustomerId) || null
+  }, [accountRows, selectedCustomerId])
 
   const selectedMovements = useMemo(() => {
     if (!selectedCustomerId) return []
@@ -452,7 +450,7 @@ export default function CustomerDebtReportView() {
     setPaymentError(null)
   }
 
-  function openPaymentModal(row: CustomerDebtRow) {
+  function openPaymentModal(row: CustomerAccountRow) {
     setSelectedCustomerId(row.customerId)
 
     if (row.deuda <= 0) return
@@ -495,7 +493,7 @@ export default function CustomerDebtReportView() {
       const notesText = paymentNotes.trim()
 
       const description = [
-        "Pago manual acreditado desde Reportes",
+        "Pago manual acreditado desde Cuentas",
         `Método: ${methodLabel(paymentMethod)}`,
         referenceText ? `Referencia: ${referenceText}` : "",
         notesText ? `Nota: ${notesText}` : ""
@@ -503,7 +501,7 @@ export default function CustomerDebtReportView() {
         .filter(Boolean)
         .join(" · ")
 
-      const payload: Record<string, unknown> = {
+      await createRow(session, "customer_account_movements", {
         customer_id: customerId,
         fecha: now.toISOString(),
         tipo: "pago",
@@ -512,13 +510,7 @@ export default function CustomerDebtReportView() {
         descripcion: description,
         reference_type: "manual_debt_payment",
         reference_id: manualReferenceId
-      }
-
-      if (session.userId) {
-        payload.created_by = session.userId
-      }
-
-      await createRow(session, "customer_account_movements", payload)
+      })
 
       setSelectedCustomerId(customerId)
       resetPaymentModal()
@@ -537,7 +529,7 @@ export default function CustomerDebtReportView() {
   }
 
   function exportRows() {
-    downloadCsv(`reporte_deuda_clientes_${new Date().toISOString().slice(0, 10)}.csv`, filteredRows)
+    downloadCsv(`cuenta_corriente_clientes_${new Date().toISOString().slice(0, 10)}.csv`, filteredRows)
   }
 
   if (loading) return <LoadingBlock />
@@ -547,8 +539,8 @@ export default function CustomerDebtReportView() {
     <div className="space-y-5">
       <Card>
         <CardHeader
-          title="Reporte de clientes"
-          subtitle="Seguimiento de deuda, antigüedad, pagos y movimientos por cliente."
+          title="Cuenta en pesos"
+          subtitle="Control de deuda, pagos y movimientos por cliente."
           right={
             <div className="flex flex-wrap justify-end gap-2">
               <div className="relative w-full sm:w-[300px]">
@@ -846,7 +838,6 @@ export default function CustomerDebtReportView() {
               <div className="mt-2 flex flex-wrap gap-2">
                 <Button
                   type="button"
-                  size="sm"
                   variant="secondary"
                   onClick={() => setPaymentAmount(String(paymentCustomer.deuda))}
                 >
@@ -855,7 +846,6 @@ export default function CustomerDebtReportView() {
 
                 <Button
                   type="button"
-                  size="sm"
                   variant="secondary"
                   onClick={() => setPaymentAmount(String(Math.round(paymentCustomer.deuda / 2)))}
                 >
@@ -864,8 +854,7 @@ export default function CustomerDebtReportView() {
 
                 <Button
                   type="button"
-                  size="sm"
-                  variant="ghost"
+                  variant="secondary"
                   onClick={() => setPaymentAmount("")}
                 >
                   Limpiar monto
