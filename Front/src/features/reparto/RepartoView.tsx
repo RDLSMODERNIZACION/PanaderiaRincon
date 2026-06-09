@@ -5,7 +5,6 @@ import CrudTableView from "@/features/crud/CrudTableView"
 import StockOverviewView from "@/features/reparto/StockOverviewView"
 import VisitsOverviewView from "@/features/reparto/VisitsOverviewView"
 import PaymentsOverviewView from "@/features/reparto/PaymentsOverviewView"
-import ClosuresOverviewView from "@/features/reparto/ClosuresOverviewView"
 
 type TabKey =
   | "delivery_runs"
@@ -13,7 +12,6 @@ type TabKey =
   | "delivery_run_stock"
   | "delivery_visits"
   | "payments"
-  | "delivery_run_closures"
 
 type TabItem = {
   key: TabKey
@@ -41,8 +39,8 @@ const controlTabs: TabItem[] = [
   {
     key: "delivery_run_stock",
     label: "Stock",
-    title: "Stock cargado",
-    subtitle: "Vista rápida de mercadería asignada a repartos."
+    title: "Stock",
+    subtitle: "Auditoría de mercadería: salió, entregado, debe volver y pan devuelto."
   },
   {
     key: "delivery_visits",
@@ -55,12 +53,6 @@ const controlTabs: TabItem[] = [
     label: "Pagos",
     title: "Pagos",
     subtitle: "Vista rápida de cobros por cliente, repartidor, método y estado."
-  },
-  {
-    key: "delivery_run_closures",
-    label: "Cierres",
-    title: "Cierres",
-    subtitle: "Resumen de cierre y rendición de cada reparto."
   }
 ]
 
@@ -106,14 +98,18 @@ export default function RepartoView() {
             Reparto y rendición
           </h1>
           <p className="mt-1 text-sm text-zinc-600">
-            Control de repartidores, mercadería cargada, visitas, pagos, devoluciones y cierres.
+            Control de repartidores, mercadería cargada, visitas, pagos y devoluciones.
           </p>
         </div>
 
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between xl:min-w-[720px]">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between xl:min-w-[620px]">
           <div className="flex flex-wrap gap-2">
             {mainTabs.map(tab => (
-              <TabButton key={tab.key} active={activeTab === tab.key} onClick={() => setActiveTab(tab.key)}>
+              <TabButton
+                key={tab.key}
+                active={activeTab === tab.key}
+                onClick={() => setActiveTab(tab.key)}
+              >
                 {tab.label}
               </TabButton>
             ))}
@@ -123,7 +119,11 @@ export default function RepartoView() {
 
           <div className="flex flex-wrap gap-2">
             {controlTabs.map(tab => (
-              <TabButton key={tab.key} active={activeTab === tab.key} onClick={() => setActiveTab(tab.key)}>
+              <TabButton
+                key={tab.key}
+                active={activeTab === tab.key}
+                onClick={() => setActiveTab(tab.key)}
+              >
                 {tab.label}
               </TabButton>
             ))}
@@ -137,8 +137,6 @@ export default function RepartoView() {
         <VisitsOverviewView />
       ) : active.key === "payments" ? (
         <PaymentsOverviewView />
-      ) : active.key === "delivery_run_closures" ? (
-        <ClosuresOverviewView />
       ) : (
         <CrudTableView
           key={active.key}

@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Minus, Plus, Save, X } from "lucide-react"
+import { Minus, Plus, Save, Trash2, X } from "lucide-react"
 import Button from "@/components/ui/Button"
 import Input from "@/components/ui/Input"
 import Select from "@/components/ui/Select"
@@ -27,6 +27,15 @@ type RepartidorCustomer = {
   nombre?: string
   direccion?: string | null
   telefono?: string | null
+  deudaActual?: number
+  deuda_actual?: number
+}
+
+type PaymentDraft = {
+  id: string
+  metodo: string
+  amount: string
+  referencia?: string
 }
 
 type Props = {
@@ -64,6 +73,11 @@ function customerId(customer: RepartidorCustomer | null) {
   return String(customer?.customerId || customer?.customer_id || "")
 }
 
+function customerDebt(customer: RepartidorCustomer | null) {
+  const n = Number(customer?.deudaActual ?? customer?.deuda_actual ?? 0)
+  return Number.isFinite(n) ? Math.max(n, 0) : 0
+}
+
 function numberFromInput(value: string) {
   if (value.trim() === "") return 0
   const n = Number(value)
@@ -96,6 +110,15 @@ function money(value: number) {
   })}`
 }
 
+function newPaymentDraft(): PaymentDraft {
+  return {
+    id: `pay_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    metodo: "efectivo",
+    amount: "0",
+    referencia: ""
+  }
+}
+
 export default function VisitModal({
   open,
   runId,
@@ -111,8 +134,7 @@ export default function VisitModal({
 
   const [quantities, setQuantities] = useState<Record<string, string>>({})
   const [panViejoKg, setPanViejoKg] = useState("0")
-  const [metodo, setMetodo] = useState("efectivo")
-  const [montoPagado, setMontoPagado] = useState("0")
+  const [payments, setPayments] = useState<PaymentDraft[]>([newPaymentDraft()])
   const [showNotes, setShowNotes] = useState(false)
   const [observaciones, setObservaciones] = useState("")
   const [saving, setSaving] = useState(false)
@@ -129,12 +151,15 @@ export default function VisitModal({
 
     setQuantities(next)
     setPanViejoKg("0")
-    setMetodo("efectivo")
-    setMontoPagado("0")
+    setPayments([newPaymentDraft()])
     setShowNotes(false)
     setObservaciones("")
     setError(null)
   }, [open, safeStock])
+
+  const deudaAnterior = useMemo(() => {
+    return customerDebt(customer)
+  }, [customer])
 
   const computedTotal = useMemo(() => {
     return safeStock.reduce((sum, item) => {
@@ -146,6 +171,26 @@ export default function VisitModal({
       return sum + cantidad * price
     }, 0)
   }, [safeStock, quantities])
+
+  const totalACobrar = useMemo(() => {
+    return deudaAnterior + computedTotal
+  }, [deudaAnterior, computedTotal])
+
+  const totalPagado = useMemo(() => {
+    return payments.reduce((sum, payment) => {
+      const amount = numberFromInput(payment.amount)
+      if (!Number.isFinite(amount) || amount <= 0) return sum
+      return sum + amount
+    }, 0)
+  }, [payments])
+
+  const saldoPendiente = useMemo(() => {
+    return Math.max(totalACobrar - totalPagado, 0)
+  }, [totalACobrar, totalPagado])
+
+  const pagoExcedido = useMemo(() => {
+    return totalPagado > totalACobrar + 0.0001
+  }, [totalPagado, totalACobrar])
 
   const hasDeliveredQuantity = useMemo(() => {
     return safeStock.some(item => {
@@ -162,13 +207,6 @@ export default function VisitModal({
       return Number.isFinite(cantidad) && cantidad > 0 && productPrice(item) <= 0
     })
   }, [safeStock, quantities])
-
-  const deuda = useMemo(() => {
-    const paid = numberFromInput(montoPagado)
-
-    if (!Number.isFinite(paid)) return 0
-    return Math.max(computedTotal - paid, 0)
-  }, [computedTotal, montoPagado])
 
   function setProductQuantity(item: RepartidorStock, value: string) {
     const id = productId(item)
@@ -204,16 +242,29 @@ export default function VisitModal({
     setPanViejoKg(normalizeNumber(next))
   }
 
+  function updatePayment(id: string, patch: Partial<PaymentDraft>) {
+    setPayments(current =>
+      current.map(payment =>
+        payment.id === id ? { ...payment, ...patch } : payment
+      )
+    )
+  }
+
+  function addPayment() {
+    setPayments(current => [...current, newPaymentDraft()])
+  }
+
+  function removePayment(id: string) {
+    setPayments(current => {
+      if (current.length <= 1) return [newPaymentDraft()]
+      return current.filter(payment => payment.id !== id)
+    })
+  }
+
   async function saveVisit() {
     if (!session || !runId || !customerId(customer)) return
 
-    const paid = numberFromInput(montoPagado)
     const panViejo = numberFromInput(panViejoKg)
-
-    if (!Number.isFinite(paid) || paid < 0) {
-      setError("Ingresá un monto pagado válido.")
-      return
-    }
 
     if (!Number.isFinite(panViejo) || panViejo < 0) {
       setError("Ingresá una cantidad válida de pan viejo.")
@@ -236,6 +287,20 @@ export default function VisitModal({
       }
     }
 
+    for (const payment of payments) {
+      const amount = numberFromInput(payment.amount)
+
+      if (!Number.isFinite(amount) || amount < 0) {
+        setError("Ingresá montos de pago válidos.")
+        return
+      }
+    }
+
+    if (pagoExcedido) {
+      setError(`El pago supera el total a cobrar. Total a cobrar: ${money(totalACobrar)}. Total pagado: ${money(totalPagado)}.`)
+      return
+    }
+
     const items = safeStock
       .map(item => {
         const id = productId(item)
@@ -250,6 +315,18 @@ export default function VisitModal({
       })
       .filter(item => item.product_id && Number.isFinite(item.cantidad) && item.cantidad > 0)
 
+    const paymentRows = payments
+      .map(payment => {
+        const amount = numberFromInput(payment.amount)
+
+        return {
+          metodo: payment.metodo,
+          amount,
+          referencia: payment.referencia?.trim() || undefined
+        }
+      })
+      .filter(payment => Number.isFinite(payment.amount) && payment.amount > 0)
+
     setSaving(true)
     setError(null)
 
@@ -259,8 +336,8 @@ export default function VisitModal({
         `/api/repartidor/mi-reparto/${encodeURIComponent(runId)}/clientes/${encodeURIComponent(customerId(customer))}/visita`,
         {
           items,
-          metodo,
-          monto_pagado: paid,
+          payments: paymentRows,
+          monto_pagado: totalPagado,
           total_venta: computedTotal,
           pan_viejo_kg: panViejo,
           observaciones: observaciones.trim() || undefined,
@@ -419,49 +496,100 @@ export default function VisitModal({
 
               <div className="rounded-2xl border border-zinc-200 p-4">
                 <div className="text-base font-semibold text-zinc-900">Cobro</div>
-                <div className="text-xs text-zinc-500">El total se calcula por mercadería y precios.</div>
+                <div className="text-xs text-zinc-500">Se suma deuda anterior, venta actual y pagos recibidos.</div>
 
-                <div className="mt-4 rounded-2xl bg-zinc-50 px-4 py-3">
-                  <div className="text-xs text-zinc-500">Total venta calculado</div>
-                  <div className="text-2xl font-semibold text-zinc-900">{money(computedTotal)}</div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-2xl bg-zinc-50 px-4 py-3">
+                    <div className="text-xs text-zinc-500">Deuda anterior</div>
+                    <div className="text-xl font-semibold text-zinc-900">{money(deudaAnterior)}</div>
+                  </div>
 
-                  {hasDeliveredQuantity && hasMissingPrices ? (
-                    <div className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                      Hay productos sin precio. El total puede quedar en $0 hasta cargar precios.
+                  <div className="rounded-2xl bg-zinc-50 px-4 py-3">
+                    <div className="text-xs text-zinc-500">Venta actual</div>
+                    <div className="text-xl font-semibold text-zinc-900">{money(computedTotal)}</div>
+                  </div>
+
+                  <div className="rounded-2xl bg-zinc-50 px-4 py-3">
+                    <div className="text-xs text-zinc-500">Total a cobrar</div>
+                    <div className="text-xl font-semibold text-zinc-900">{money(totalACobrar)}</div>
+                  </div>
+                </div>
+
+                {hasDeliveredQuantity && hasMissingPrices ? (
+                  <div className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    Hay productos sin precio. El total puede quedar en $0 hasta cargar precios.
+                  </div>
+                ) : null}
+
+                <div className="mt-4 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <div className="text-sm font-semibold text-zinc-900">Pagos recibidos</div>
+                      <div className="text-xs text-zinc-500">Puede cargar más de un método.</div>
                     </div>
-                  ) : null}
+
+                    <Button type="button" variant="secondary" onClick={addPayment} disabled={saving}>
+                      <Plus className="mr-2 h-4 w-4" />
+                      Agregar pago
+                    </Button>
+                  </div>
+
+                  <div className="space-y-2">
+                    {payments.map(payment => (
+                      <div key={payment.id} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                        <Select
+                          value={payment.metodo}
+                          onChange={e => updatePayment(payment.id, { metodo: e.target.value })}
+                          className="h-12"
+                        >
+                          <option value="efectivo">Efectivo</option>
+                          <option value="transferencia">Transferencia</option>
+                          <option value="mercado_pago">Mercado Pago</option>
+                          <option value="qr">QR</option>
+                          <option value="otro">Otro</option>
+                        </Select>
+
+                        <Input
+                          type="number"
+                          step="any"
+                          min="0"
+                          value={payment.amount}
+                          onChange={e => updatePayment(payment.id, { amount: e.target.value })}
+                          placeholder="Monto"
+                          className="h-12 text-lg font-semibold"
+                        />
+
+                        <button
+                          type="button"
+                          onClick={() => removePayment(payment.id)}
+                          disabled={saving}
+                          className="grid h-12 w-12 place-items-center rounded-2xl border border-zinc-200 bg-white text-red-600 hover:bg-red-50 disabled:opacity-40"
+                          aria-label="Quitar pago"
+                        >
+                          <Trash2 className="h-5 w-5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <label className="block">
-                    <span className="mb-1 block text-xs font-medium text-zinc-600">Pagó</span>
-                    <Input
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={montoPagado}
-                      onChange={e => setMontoPagado(e.target.value)}
-                      placeholder="0"
-                      className="h-12 text-lg font-semibold"
-                    />
-                  </label>
+                  <div className="rounded-2xl bg-zinc-50 px-4 py-3">
+                    <div className="text-xs text-zinc-500">Total pagado</div>
+                    <div className="text-2xl font-semibold text-zinc-900">{money(totalPagado)}</div>
+                  </div>
 
-                  <label className="block">
-                    <span className="mb-1 block text-xs font-medium text-zinc-600">Método</span>
-                    <Select value={metodo} onChange={e => setMetodo(e.target.value)} className="h-12">
-                      <option value="efectivo">Efectivo</option>
-                      <option value="transferencia">Transferencia</option>
-                      <option value="mercado_pago">Mercado Pago</option>
-                      <option value="qr">QR</option>
-                      <option value="otro">Otro</option>
-                    </Select>
-                  </label>
+                  <div className="rounded-2xl bg-zinc-50 px-4 py-3">
+                    <div className="text-xs text-zinc-500">Saldo pendiente</div>
+                    <div className="text-2xl font-semibold text-zinc-900">{money(saldoPendiente)}</div>
+                  </div>
                 </div>
 
-                <div className="mt-4 rounded-2xl bg-zinc-50 px-4 py-3">
-                  <div className="text-xs text-zinc-500">Queda debiendo</div>
-                  <div className="text-2xl font-semibold text-zinc-900">{money(deuda)}</div>
-                </div>
+                {pagoExcedido ? (
+                  <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                    El pago supera el total a cobrar. Revisá los montos cargados.
+                  </div>
+                ) : null}
               </div>
             </div>
 
@@ -496,7 +624,7 @@ export default function VisitModal({
               Cancelar
             </Button>
 
-            <Button type="button" onClick={saveVisit} disabled={saving}>
+            <Button type="button" onClick={saveVisit} disabled={saving || pagoExcedido}>
               <Save className="mr-2 h-4 w-4" />
               {saving ? "Guardando..." : "Guardar visita"}
             </Button>
