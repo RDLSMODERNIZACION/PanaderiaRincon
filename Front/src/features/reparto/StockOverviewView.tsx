@@ -214,7 +214,12 @@ export default function StockOverviewView() {
   const [warning, setWarning] = useState<string | null>(null)
 
   const load = useCallback(async () => {
-    if (!session) return
+    if (!session) {
+      setLoading(false)
+      return
+    }
+
+    const currentSession = session
 
     setLoading(true)
     setError(null)
@@ -222,12 +227,12 @@ export default function StockOverviewView() {
 
     try {
       const [stockPayload, productsPayload, runsPayload, employeesPayload, routesPayload, customersPayload] = await Promise.all([
-        apiGet(session, "/api/admin/crud/delivery_run_stock?limit=1000&order_by=created_at&desc=true"),
-        apiGet(session, "/api/admin/crud/products?limit=1000&order_by=nombre"),
-        apiGet(session, "/api/admin/crud/delivery_runs?limit=1000&order_by=fecha&desc=true"),
-        apiGet(session, "/api/admin/crud/employees?limit=1000&order_by=nombre"),
-        apiGet(session, "/api/admin/crud/delivery_routes?limit=1000&order_by=nombre"),
-        apiGet(session, "/api/admin/crud/customers?limit=1000&order_by=nombre")
+        apiGet(currentSession, "/api/admin/crud/delivery_run_stock?limit=1000&order_by=created_at&desc=true"),
+        apiGet(currentSession, "/api/admin/crud/products?limit=1000&order_by=nombre"),
+        apiGet(currentSession, "/api/admin/crud/delivery_runs?limit=1000&order_by=fecha&desc=true"),
+        apiGet(currentSession, "/api/admin/crud/employees?limit=1000&order_by=nombre"),
+        apiGet(currentSession, "/api/admin/crud/delivery_routes?limit=1000&order_by=nombre"),
+        apiGet(currentSession, "/api/admin/crud/customers?limit=1000&order_by=nombre")
       ])
 
       const stockRows = unwrapData<RowData[]>(stockPayload) || []
@@ -237,9 +242,9 @@ export default function StockOverviewView() {
       const routes = unwrapData<RowData[]>(routesPayload) || []
       const customers = unwrapData<RowData[]>(customersPayload) || []
 
-      async function optionalRows(path: string, label: string) {
+      async function optionalRows(path: string, label: string): Promise<RowData[]> {
         try {
-          const payload = await apiGet(session, path)
+          const payload = await apiGet(currentSession, path)
           return unwrapData<RowData[]>(payload) || []
         } catch (exc) {
           console.warn(`No se pudo cargar ${label}`, exc)
