@@ -224,7 +224,12 @@ export default function VisitsOverviewView() {
   const [warning, setWarning] = useState<string | null>(null)
 
   const load = useCallback(async () => {
-    if (!session) return
+    if (!session) {
+      setLoading(false)
+      return
+    }
+
+    const currentSession = session
 
     setLoading(true)
     setError(null)
@@ -232,11 +237,11 @@ export default function VisitsOverviewView() {
 
     try {
       const [visitsPayload, customersPayload, runsPayload, employeesPayload, routesPayload] = await Promise.all([
-        apiGet(session, "/api/admin/crud/delivery_visits?limit=1000&order_by=arrived_at&desc=true"),
-        apiGet(session, "/api/admin/crud/customers?limit=1000&order_by=nombre"),
-        apiGet(session, "/api/admin/crud/delivery_runs?limit=1000&order_by=fecha&desc=true"),
-        apiGet(session, "/api/admin/crud/employees?limit=1000&order_by=nombre"),
-        apiGet(session, "/api/admin/crud/delivery_routes?limit=1000&order_by=nombre")
+        apiGet(currentSession, "/api/admin/crud/delivery_visits?limit=1000&order_by=arrived_at&desc=true"),
+        apiGet(currentSession, "/api/admin/crud/customers?limit=1000&order_by=nombre"),
+        apiGet(currentSession, "/api/admin/crud/delivery_runs?limit=1000&order_by=fecha&desc=true"),
+        apiGet(currentSession, "/api/admin/crud/employees?limit=1000&order_by=nombre"),
+        apiGet(currentSession, "/api/admin/crud/delivery_routes?limit=1000&order_by=nombre")
       ])
 
       const visits = unwrapData<RowData[]>(visitsPayload) || []
@@ -245,9 +250,9 @@ export default function VisitsOverviewView() {
       const employees = unwrapData<RowData[]>(employeesPayload) || []
       const routes = unwrapData<RowData[]>(routesPayload) || []
 
-      async function optionalRows(path: string, label: string) {
+      async function optionalRows(path: string, label: string): Promise<RowData[]> {
         try {
-          const payload = await apiGet(session, path)
+          const payload = await apiGet(currentSession, path)
           return unwrapData<RowData[]>(payload) || []
         } catch (exc) {
           console.warn(`No se pudo cargar ${label}`, exc)
