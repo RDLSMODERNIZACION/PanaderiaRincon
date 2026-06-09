@@ -171,9 +171,14 @@ function formatDate(value: unknown) {
 
 function formatDateTime(value: unknown) {
   if (!value) return "-"
+
   const d = new Date(String(value))
   if (Number.isNaN(d.getTime())) return String(value)
-  return d.toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" })
+
+  return d.toLocaleString("es-AR", {
+    dateStyle: "short",
+    timeStyle: "short"
+  })
 }
 
 function money(value: number) {
@@ -218,7 +223,12 @@ export default function ClosuresOverviewView() {
   const [warning, setWarning] = useState<string | null>(null)
 
   const load = useCallback(async () => {
-    if (!session) return
+    const currentSession = session
+
+    if (!currentSession) {
+      setLoading(false)
+      return
+    }
 
     setLoading(true)
     setError(null)
@@ -226,18 +236,18 @@ export default function ClosuresOverviewView() {
 
     try {
       const [runsPayload, employeesPayload, routesPayload] = await Promise.all([
-        apiGet(session, "/api/admin/crud/delivery_runs?limit=1000&order_by=fecha&desc=true"),
-        apiGet(session, "/api/admin/crud/employees?limit=1000&order_by=nombre"),
-        apiGet(session, "/api/admin/crud/delivery_routes?limit=1000&order_by=nombre")
+        apiGet(currentSession, "/api/admin/crud/delivery_runs?limit=1000&order_by=fecha&desc=true"),
+        apiGet(currentSession, "/api/admin/crud/employees?limit=1000&order_by=nombre"),
+        apiGet(currentSession, "/api/admin/crud/delivery_routes?limit=1000&order_by=nombre")
       ])
 
       const runs = unwrapData<RowData[]>(runsPayload) || []
       const employees = unwrapData<RowData[]>(employeesPayload) || []
       const routes = unwrapData<RowData[]>(routesPayload) || []
 
-      async function optionalRows(path: string, label: string) {
+      async function optionalRows(path: string, label: string): Promise<RowData[]> {
         try {
-          const payload = await apiGet(session, path)
+          const payload = await apiGet(currentSession, path)
           return unwrapData<RowData[]>(payload) || []
         } catch (exc) {
           console.warn(`No se pudo cargar ${label}`, exc)
@@ -274,6 +284,7 @@ export default function ClosuresOverviewView() {
       for (const visit of visits) {
         const visitId = getId(visit)
         const runId = getVisitRunId(visit)
+
         if (!visitId || !runId) continue
 
         visitRunByVisitId.set(visitId, runId)
@@ -284,7 +295,10 @@ export default function ClosuresOverviewView() {
 
         const group = visitsByRun.get(runId)!
         group.total += 1
-        if (String(visit.estado || "") === "cerrada") group.cerradas += 1
+
+        if (String(visit.estado || "") === "cerrada") {
+          group.cerradas += 1
+        }
       }
 
       const soldByRun = new Map<string, number>()
@@ -293,6 +307,7 @@ export default function ClosuresOverviewView() {
       for (const item of visitItems) {
         const visitId = getItemVisitId(item)
         const runId = visitRunByVisitId.get(visitId)
+
         if (!runId) continue
         if (getItemTipo(item) !== "venta") continue
 
@@ -308,6 +323,7 @@ export default function ClosuresOverviewView() {
         if (getPaymentEstado(payment) === "rechazado") continue
 
         const runId = getPaymentRunId(payment) || visitRunByVisitId.get(getPaymentVisitId(payment)) || ""
+
         if (!runId) continue
 
         paidByRun.set(runId, (paidByRun.get(runId) || 0) + getPaymentAmount(payment))
@@ -331,7 +347,9 @@ export default function ClosuresOverviewView() {
 
       for (const movement of breadcrumbs) {
         const runId = visitRunByVisitId.get(getBreadVisitId(movement)) || ""
+
         if (!runId) continue
+
         breadByRun.set(runId, (breadByRun.get(runId) || 0) + getKgEntrada(movement))
       }
 
@@ -348,6 +366,7 @@ export default function ClosuresOverviewView() {
         loadedProductsByRun.set(runId, (loadedProductsByRun.get(runId) || 0) + 1)
 
         const delivered = deliveredByRunProduct.get(`${runId}__${productId}`) || 0
+
         if (loaded - delivered > 0.0001) {
           pendingProductsByRun.set(runId, (pendingProductsByRun.get(runId) || 0) + 1)
         }
@@ -421,12 +440,30 @@ export default function ClosuresOverviewView() {
     })
   }, [rows, q, fecha, estadoCierre])
 
-  const totalVendido = useMemo(() => filteredRows.reduce((sum, row) => sum + row.vendido, 0), [filteredRows])
-  const totalCobrado = useMemo(() => filteredRows.reduce((sum, row) => sum + row.cobrado, 0), [filteredRows])
-  const totalDeuda = useMemo(() => filteredRows.reduce((sum, row) => sum + row.deuda, 0), [filteredRows])
-  const totalPanViejo = useMemo(() => filteredRows.reduce((sum, row) => sum + row.panViejoKg, 0), [filteredRows])
-  const cierresGuardados = useMemo(() => filteredRows.filter(row => row.cierreGuardado).length, [filteredRows])
-  const cierresPendientes = useMemo(() => filteredRows.filter(row => !row.cierreGuardado).length, [filteredRows])
+  const totalCobrado = useMemo(
+    () => filteredRows.reduce((sum, row) => sum + row.cobrado, 0),
+    [filteredRows]
+  )
+
+  const totalDeuda = useMemo(
+    () => filteredRows.reduce((sum, row) => sum + row.deuda, 0),
+    [filteredRows]
+  )
+
+  const totalPanViejo = useMemo(
+    () => filteredRows.reduce((sum, row) => sum + row.panViejoKg, 0),
+    [filteredRows]
+  )
+
+  const cierresGuardados = useMemo(
+    () => filteredRows.filter(row => row.cierreGuardado).length,
+    [filteredRows]
+  )
+
+  const cierresPendientes = useMemo(
+    () => filteredRows.filter(row => !row.cierreGuardado).length,
+    [filteredRows]
+  )
 
   const driverSummary = useMemo<DriverSummary[]>(() => {
     const map = new Map<string, DriverSummary>()
@@ -490,7 +527,11 @@ export default function ClosuresOverviewView() {
                 className="w-full sm:w-[160px]"
               />
 
-              <Select value={estadoCierre} onChange={e => setEstadoCierre(e.target.value)} className="w-full sm:w-[160px]">
+              <Select
+                value={estadoCierre}
+                onChange={e => setEstadoCierre(e.target.value)}
+                className="w-full sm:w-[160px]"
+              >
                 <option value="">Todos</option>
                 <option value="pendiente">Pendientes</option>
                 <option value="guardado">Guardados</option>
@@ -554,6 +595,7 @@ export default function ClosuresOverviewView() {
 
       <Card>
         <CardHeader title="Resumen por repartidor" subtitle="Totales por repartidor según el filtro actual." />
+
         <CardBody className="p-0">
           {driverSummary.length === 0 ? (
             <div className="p-5">
@@ -630,7 +672,9 @@ export default function ClosuresOverviewView() {
                       <td className="px-4 py-3 text-zinc-700">{formatDate(row.fecha)}</td>
                       <td className="px-4 py-3 font-medium text-zinc-900">{row.repartidor || "-"}</td>
                       <td className="px-4 py-3 text-zinc-700">{row.recorrido || "-"}</td>
-                      <td className="px-4 py-3 text-zinc-700">{row.visitasCerradas}/{row.visitas}</td>
+                      <td className="px-4 py-3 text-zinc-700">
+                        {row.visitasCerradas}/{row.visitas}
+                      </td>
                       <td className="px-4 py-3 text-zinc-900">{money(row.vendido)}</td>
                       <td className="px-4 py-3 font-semibold text-zinc-900">{money(row.cobrado)}</td>
                       <td className="px-4 py-3 text-zinc-900">{money(row.deuda)}</td>
