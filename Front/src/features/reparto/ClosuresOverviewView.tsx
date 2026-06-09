@@ -223,14 +223,14 @@ export default function ClosuresOverviewView() {
   const [warning, setWarning] = useState<string | null>(null)
 
   const load = useCallback(async () => {
-    const currentSession = session
+  if (!session) {
+    setLoading(false)
+    return
+  }
 
-    if (!currentSession) {
-      setLoading(false)
-      return
-    }
+  const currentSession = session
 
-    setLoading(true)
+  setLoading(true)
     setError(null)
     setWarning(null)
 
