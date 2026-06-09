@@ -33,7 +33,7 @@ type Props = {
   open: boolean
   runId: string
   customer: RepartidorCustomer | null
-  stock: RepartidorStock[]
+  stock?: RepartidorStock[]
   session: ApiSession | null
   onClose: () => void
   onSaved: () => Promise<void> | void
@@ -56,7 +56,8 @@ function productPrice(item: RepartidorStock) {
 }
 
 function productRemaining(item: RepartidorStock) {
-  return Number(item.cantidadRestante ?? item.cantidad_restante ?? 0)
+  const n = Number(item.cantidadRestante ?? item.cantidad_restante ?? 0)
+  return Number.isFinite(n) ? n : 0
 }
 
 function customerId(customer: RepartidorCustomer | null) {
@@ -73,6 +74,13 @@ function normalizeNumber(value: number) {
   if (!Number.isFinite(value)) return "0"
   if (value < 0) return "0"
   return String(Number(value.toFixed(2)))
+}
+
+function clampQuantity(value: number, max: number) {
+  if (!Number.isFinite(value)) return 0
+  if (value < 0) return 0
+  if (value > max) return max
+  return value
 }
 
 function stepForProduct(item: RepartidorStock) {
@@ -97,6 +105,10 @@ export default function VisitModal({
   onClose,
   onSaved
 }: Props) {
+  const safeStock = useMemo(() => {
+    return Array.isArray(stock) ? stock : []
+  }, [stock])
+
   const [quantities, setQuantities] = useState<Record<string, string>>({})
   const [panViejoKg, setPanViejoKg] = useState("0")
   const [metodo, setMetodo] = useState("efectivo")
@@ -111,7 +123,7 @@ export default function VisitModal({
 
     const next: Record<string, string> = {}
 
-    for (const item of stock) {
+    for (const item of safeStock) {
       next[productId(item)] = "0"
     }
 
@@ -122,10 +134,10 @@ export default function VisitModal({
     setShowNotes(false)
     setObservaciones("")
     setError(null)
-  }, [open, stock])
+  }, [open, safeStock])
 
   const computedTotal = useMemo(() => {
-    return stock.reduce((sum, item) => {
+    return safeStock.reduce((sum, item) => {
       const id = productId(item)
       const cantidad = numberFromInput(quantities[id] || "0")
       const price = productPrice(item)
@@ -133,23 +145,23 @@ export default function VisitModal({
       if (!Number.isFinite(cantidad) || cantidad <= 0) return sum
       return sum + cantidad * price
     }, 0)
-  }, [stock, quantities])
+  }, [safeStock, quantities])
 
   const hasDeliveredQuantity = useMemo(() => {
-    return stock.some(item => {
+    return safeStock.some(item => {
       const id = productId(item)
       const cantidad = numberFromInput(quantities[id] || "0")
       return Number.isFinite(cantidad) && cantidad > 0
     })
-  }, [stock, quantities])
+  }, [safeStock, quantities])
 
   const hasMissingPrices = useMemo(() => {
-    return stock.some(item => {
+    return safeStock.some(item => {
       const id = productId(item)
       const cantidad = numberFromInput(quantities[id] || "0")
       return Number.isFinite(cantidad) && cantidad > 0 && productPrice(item) <= 0
     })
-  }, [stock, quantities])
+  }, [safeStock, quantities])
 
   const deuda = useMemo(() => {
     const paid = numberFromInput(montoPagado)
@@ -158,26 +170,38 @@ export default function VisitModal({
     return Math.max(computedTotal - paid, 0)
   }, [computedTotal, montoPagado])
 
-  function setProductQuantity(id: string, value: string) {
+  function setProductQuantity(item: RepartidorStock, value: string) {
+    const id = productId(item)
+    const max = productRemaining(item)
+    const n = numberFromInput(value)
+    const next = clampQuantity(n, max)
+
     setQuantities(current => ({
       ...current,
-      [id]: value
+      [id]: normalizeNumber(next)
     }))
   }
 
   function changeProductQuantity(item: RepartidorStock, delta: number) {
     const id = productId(item)
+    const max = productRemaining(item)
+
     const current = numberFromInput(quantities[id] || "0")
     const safeCurrent = Number.isFinite(current) ? current : 0
-    const next = safeCurrent + delta
+    const next = clampQuantity(safeCurrent + delta, max)
 
-    setProductQuantity(id, normalizeNumber(next))
+    setQuantities(currentValues => ({
+      ...currentValues,
+      [id]: normalizeNumber(next)
+    }))
   }
 
   function changePanViejo(delta: number) {
     const current = numberFromInput(panViejoKg)
     const safeCurrent = Number.isFinite(current) ? current : 0
-    setPanViejoKg(normalizeNumber(safeCurrent + delta))
+    const next = Math.max(safeCurrent + delta, 0)
+
+    setPanViejoKg(normalizeNumber(next))
   }
 
   async function saveVisit() {
@@ -196,7 +220,23 @@ export default function VisitModal({
       return
     }
 
-    const items = stock
+    for (const item of safeStock) {
+      const id = productId(item)
+      const cantidad = numberFromInput(quantities[id] || "0")
+      const restante = productRemaining(item)
+
+      if (!Number.isFinite(cantidad) || cantidad < 0) {
+        setError(`Cantidad inválida en ${productName(item)}.`)
+        return
+      }
+
+      if (cantidad > restante) {
+        setError(`No podés dejar más ${productName(item)} que lo disponible. Disponible: ${restante}.`)
+        return
+      }
+    }
+
+    const items = safeStock
       .map(item => {
         const id = productId(item)
         const cantidad = numberFromInput(quantities[id] || "0")
@@ -209,17 +249,6 @@ export default function VisitModal({
         }
       })
       .filter(item => item.product_id && Number.isFinite(item.cantidad) && item.cantidad > 0)
-
-    for (const item of stock) {
-      const id = productId(item)
-      const cantidad = numberFromInput(quantities[id] || "0")
-      const restante = productRemaining(item)
-
-      if (Number.isFinite(cantidad) && cantidad > restante) {
-        setError(`No podés dejar más ${productName(item)} que lo disponible. Disponible: ${restante}.`)
-        return
-      }
-    }
 
     setSaving(true)
     setError(null)
@@ -274,7 +303,12 @@ export default function VisitModal({
               ) : null}
             </div>
 
-            <button type="button" className="rounded-xl p-2 hover:bg-zinc-100" onClick={onClose}>
+            <button
+              type="button"
+              className="rounded-xl p-2 hover:bg-zinc-100"
+              onClick={onClose}
+              disabled={saving}
+            >
               <X className="h-5 w-5" />
             </button>
           </div>
@@ -286,30 +320,34 @@ export default function VisitModal({
                 <div className="text-xs text-zinc-500">Cargá solo lo que quedó en el comercio.</div>
               </div>
 
-              {stock.length === 0 ? (
+              {safeStock.length === 0 ? (
                 <div className="px-4 py-5 text-sm text-zinc-500">
                   No hay mercadería asignada al reparto.
                 </div>
               ) : (
                 <div className="divide-y divide-zinc-100">
-                  {stock.map(item => {
+                  {safeStock.map(item => {
                     const id = productId(item)
                     const cantidad = quantities[id] ?? "0"
                     const step = stepForProduct(item)
+                    const restante = productRemaining(item)
+                    const cantidadNumerica = numberFromInput(cantidad)
+                    const puedeSumar = Number.isFinite(cantidadNumerica) && cantidadNumerica < restante
+                    const puedeRestar = Number.isFinite(cantidadNumerica) && cantidadNumerica > 0
 
                     return (
                       <div key={id} className="grid grid-cols-[1fr_auto] gap-3 px-4 py-4">
                         <div className="min-w-0">
                           <div className="text-lg font-semibold text-zinc-900">{productName(item)}</div>
                           <div className="mt-1 text-xs text-zinc-500">
-                            {productUnit(item) || "-"} · Disponible: {productRemaining(item)}
+                            {productUnit(item) || "-"} · Disponible: {restante}
                           </div>
                         </div>
 
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            disabled={saving}
+                            disabled={saving || !puedeRestar}
                             onClick={() => changeProductQuantity(item, -step)}
                             className="grid h-12 w-12 place-items-center rounded-2xl border border-zinc-200 bg-white text-zinc-900 shadow-sm hover:bg-zinc-50 disabled:opacity-40"
                           >
@@ -320,14 +358,15 @@ export default function VisitModal({
                             type="number"
                             step="any"
                             min="0"
+                            max={restante}
                             value={cantidad}
-                            onChange={e => setProductQuantity(id, e.target.value)}
+                            onChange={e => setProductQuantity(item, e.target.value)}
                             className="h-12 w-24 text-center text-lg font-semibold"
                           />
 
                           <button
                             type="button"
-                            disabled={saving}
+                            disabled={saving || !puedeSumar}
                             onClick={() => changeProductQuantity(item, step)}
                             className="grid h-12 w-12 place-items-center rounded-2xl bg-zinc-900 text-white shadow-sm hover:bg-zinc-800 disabled:opacity-40"
                           >
@@ -349,7 +388,7 @@ export default function VisitModal({
                 <div className="mt-4 flex items-center gap-2">
                   <button
                     type="button"
-                    disabled={saving}
+                    disabled={saving || numberFromInput(panViejoKg) <= 0}
                     onClick={() => changePanViejo(-0.5)}
                     className="grid h-12 w-12 place-items-center rounded-2xl border border-zinc-200 bg-white text-zinc-900 shadow-sm hover:bg-zinc-50 disabled:opacity-40"
                   >
@@ -361,7 +400,7 @@ export default function VisitModal({
                     step="any"
                     min="0"
                     value={panViejoKg}
-                    onChange={e => setPanViejoKg(e.target.value)}
+                    onChange={e => setPanViejoKg(normalizeNumber(Math.max(numberFromInput(e.target.value), 0)))}
                     className="h-12 text-center text-lg font-semibold"
                   />
 

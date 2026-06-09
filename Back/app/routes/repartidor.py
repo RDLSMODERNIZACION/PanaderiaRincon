@@ -20,8 +20,17 @@ class VisitItemPayload(BaseModel):
     tipo: str = "venta"
 
 
+class PaymentPayload(BaseModel):
+    metodo: str = "efectivo"
+    amount: float = 0
+    referencia: str | None = None
+    comprobante_url: str | None = None
+
+
 class SaveVisitPayload(BaseModel):
     items: list[VisitItemPayload] = Field(default_factory=list)
+
+    payments: list[PaymentPayload] = Field(default_factory=list)
 
     metodo: str = "efectivo"
     amount: float = 0
@@ -153,6 +162,34 @@ def _run_row_for_user(run_id: str | None, auth: AuthContext) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="No hay reparto activo asignado.")
 
     return row
+
+
+def _customer_balance(customer_id: str, exclude_visit_id: str | None = None) -> float:
+    if exclude_visit_id:
+        row = fetch_one(
+            """
+            select coalesce(sum(debe - haber), 0) as saldo
+            from public.customer_account_movements
+            where customer_id = %s
+              and not (
+                reference_type = 'delivery_visit'
+                and reference_id = %s
+              )
+            """,
+            [customer_id, exclude_visit_id],
+        )
+    else:
+        row = fetch_one(
+            """
+            select coalesce(sum(debe - haber), 0) as saldo
+            from public.customer_account_movements
+            where customer_id = %s
+            """,
+            [customer_id],
+        )
+
+    saldo = float(row["saldo"] or 0) if row else 0
+    return max(saldo, 0)
 
 
 def _base_product_price(product_id: str, customer_id: str) -> float:
@@ -288,6 +325,49 @@ def _payment_method_for_db(method: str) -> str:
     return "otro"
 
 
+def _payment_rows_from_payload(payload: SaveVisitPayload) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+
+    if payload.payments:
+        for payment in payload.payments:
+            amount = float(payment.amount or 0)
+
+            if amount < 0:
+                raise HTTPException(status_code=400, detail="El monto de un pago no puede ser negativo.")
+
+            if amount <= 0:
+                continue
+
+            rows.append(
+                {
+                    "metodo": _payment_method_for_db(payment.metodo),
+                    "amount": amount,
+                    "referencia": payment.referencia,
+                    "comprobante_url": payment.comprobante_url,
+                }
+            )
+
+        return rows
+
+    amount = payload.monto_pagado if payload.monto_pagado is not None else payload.amount
+    amount = float(amount or 0)
+
+    if amount < 0:
+        raise HTTPException(status_code=400, detail="El monto pagado no puede ser negativo.")
+
+    if amount > 0:
+        rows.append(
+            {
+                "metodo": _payment_method_for_db(payload.metodo),
+                "amount": amount,
+                "referencia": payload.referencia,
+                "comprobante_url": payload.comprobante_url,
+            }
+        )
+
+    return rows
+
+
 def _visit_status(row: dict[str, Any] | None) -> str:
     if not row:
         return "pendiente"
@@ -325,12 +405,12 @@ def _latest_visits_by_customer(run_id: str) -> dict[str, dict[str, Any]]:
             where p.visit_id = v.id
               and p.estado = 'confirmado'
           ), 0) as total_cobrado,
-          coalesce((
+          greatest(coalesce((
             select sum(m.debe - m.haber)
             from public.customer_account_movements m
             where m.reference_type = 'delivery_visit'
               and m.reference_id = v.id
-          ), 0) as deuda,
+          ), 0), 0) as deuda,
           coalesce((
             select sum(b.kg_entrada)
             from public.breadcrumb_account_movements b
@@ -524,6 +604,7 @@ def _customers_for_run(run: dict[str, Any]) -> list[dict[str, Any]]:
                 "latitud": row["latitud"],
                 "longitud": row["longitud"],
                 "observaciones": row["observaciones"],
+                "deuda_actual": _customer_balance(customer_id),
                 "estado_visita": _visit_status(visit),
                 "visit": visit,
             }
@@ -756,12 +837,6 @@ def guardar_visita(
                 detail=f"No hay suficiente stock de {product_nombre}. Disponible: {restante}. Intentaste dejar: {cantidad}.",
             )
 
-    payment_amount = payload.monto_pagado if payload.monto_pagado is not None else payload.amount
-    payment_amount = float(payment_amount or 0)
-
-    if payment_amount < 0:
-        raise HTTPException(status_code=400, detail="El monto pagado no puede ser negativo.")
-
     computed_total = 0.0
     prepared_items: list[dict[str, Any]] = []
 
@@ -797,7 +872,23 @@ def guardar_visita(
         )
 
     total_venta = computed_total
-    deuda = max(total_venta - payment_amount, 0)
+
+    deuda_anterior = _customer_balance(customer_id, exclude_visit_id=existing_visit_id)
+    total_a_cobrar = deuda_anterior + total_venta
+
+    prepared_payments = _payment_rows_from_payload(payload)
+    total_pagado = sum(float(payment["amount"] or 0) for payment in prepared_payments)
+
+    if total_pagado > total_a_cobrar + 0.0001:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"El pago supera la deuda total del comercio. "
+                f"Total a cobrar: {total_a_cobrar}. Pagó: {total_pagado}."
+            ),
+        )
+
+    saldo_pendiente = max(total_a_cobrar - total_pagado, 0)
 
     with get_conn() as conn, conn.cursor() as cur:
         if existing_visit:
@@ -910,7 +1001,7 @@ def guardar_visita(
                 ],
             )
 
-        if payment_amount > 0:
+        for payment in prepared_payments:
             cur.execute(
                 """
                 insert into public.payments (
@@ -931,14 +1022,14 @@ def guardar_visita(
                     visit_id,
                     customer_id,
                     run_id,
-                    _payment_method_for_db(payload.metodo),
-                    payment_amount,
-                    payload.referencia,
-                    payload.comprobante_url,
+                    payment["metodo"],
+                    payment["amount"],
+                    payment["referencia"],
+                    payment["comprobante_url"],
                 ],
             )
 
-        if deuda > 0:
+        if total_venta > 0:
             cur.execute(
                 """
                 insert into public.customer_account_movements (
@@ -957,8 +1048,33 @@ def guardar_visita(
                 [
                     new_id("cta"),
                     customer_id,
-                    deuda,
-                    f"Deuda generada por visita de reparto {run_id}",
+                    total_venta,
+                    f"Venta generada por visita de reparto {run_id}",
+                    visit_id,
+                ],
+            )
+
+        if total_pagado > 0:
+            cur.execute(
+                """
+                insert into public.customer_account_movements (
+                  id,
+                  customer_id,
+                  fecha,
+                  tipo,
+                  debe,
+                  haber,
+                  descripcion,
+                  reference_type,
+                  reference_id
+                )
+                values (%s, %s, now(), 'pago', 0, %s, %s, 'delivery_visit', %s)
+                """,
+                [
+                    new_id("cta"),
+                    customer_id,
+                    total_pagado,
+                    f"Pago recibido en visita de reparto {run_id}",
                     visit_id,
                 ],
             )
@@ -993,11 +1109,15 @@ def guardar_visita(
         {
             "visit": visit,
             "totals": {
+                "deuda_anterior": deuda_anterior,
                 "total_venta": total_venta,
-                "total_cobrado": payment_amount,
-                "deuda": deuda,
+                "total_a_cobrar": total_a_cobrar,
+                "total_cobrado": total_pagado,
+                "deuda": saldo_pendiente,
+                "saldo_pendiente": saldo_pendiente,
                 "pan_viejo_kg": float(payload.pan_viejo_kg or 0),
             },
+            "payments": prepared_payments,
             "items": prepared_items,
             "run_detail": _run_detail(run, auth),
         }
