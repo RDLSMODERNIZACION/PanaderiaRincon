@@ -144,6 +144,14 @@ function getRunCreatedAt(row?: RowData) {
   return String(row?.startedAt || row?.started_at || row?.createdAt || row?.created_at || "")
 }
 
+function todayLocalDate() {
+  const d = new Date()
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, "0")
+  const day = String(d.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
 function formatDate(value: unknown) {
   if (!value) return "-"
 
@@ -563,6 +571,10 @@ export default function StockOverviewView() {
     setRepartoId("")
   }
 
+  function setTodayFilter() {
+    setFecha(todayLocalDate())
+  }
+
   function exportRows() {
     downloadCsv(`stock_auditoria_${new Date().toISOString().slice(0, 10)}.csv`, filteredRows)
   }
@@ -601,12 +613,22 @@ export default function StockOverviewView() {
                 ))}
               </Select>
 
-              <Input
-                type="date"
-                value={fecha}
-                onChange={e => setFecha(e.target.value)}
-                className="w-full sm:w-[160px]"
-              />
+              <div className="flex w-full gap-2 sm:w-auto">
+                <Input
+                  type="date"
+                  value={fecha}
+                  onChange={e => setFecha(e.target.value)}
+                  className="w-full sm:w-[160px]"
+                />
+
+                <Button
+                  type="button"
+                  variant={fecha === todayLocalDate() ? "primary" : "secondary"}
+                  onClick={setTodayFilter}
+                >
+                  Hoy
+                </Button>
+              </div>
 
               <Select
                 value={repartoId}

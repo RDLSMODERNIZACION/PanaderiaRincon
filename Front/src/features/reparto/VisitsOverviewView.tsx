@@ -15,14 +15,19 @@ import type { RowData } from "@/features/crud/types"
 type VisitRow = {
   id: string
   fecha: string
+  hora: string
+  sortTs: string
   arrivedAt: string
   closedAt: string
   estado: string
+
   repartoId: string
-  cliente: string
-  direccion: string
+  repartidorId: string
   repartidor: string
   recorrido: string
+
+  cliente: string
+  direccion: string
   productos: string
   totalVendido: number
   totalCobrado: number
@@ -38,6 +43,17 @@ type DriverSummary = {
   cobrado: number
   deuda: number
   panViejoKg: number
+}
+
+type RunOption = {
+  runId: string
+  fecha: string
+  hora: string
+  sortTs: string
+  repartidor: string
+  repartidorId: string
+  recorrido: string
+  estado: string
 }
 
 function getId(row?: RowData) {
@@ -64,6 +80,10 @@ function getRunRouteId(row?: RowData) {
   return String(row?.routeId || row?.route_id || "")
 }
 
+function getRunCreatedAt(row?: RowData) {
+  return String(row?.startedAt || row?.started_at || row?.createdAt || row?.created_at || "")
+}
+
 function getPaymentVisitId(row: RowData) {
   return String(row.visitId || row.visit_id || "")
 }
@@ -83,6 +103,10 @@ function getMovementReferenceType(row: RowData) {
 
 function getMovementReferenceId(row: RowData) {
   return String(row.referenceId || row.reference_id || "")
+}
+
+function getMovementTipo(row: RowData) {
+  return String(row.tipo || "")
 }
 
 function getDebe(row: RowData) {
@@ -126,6 +150,14 @@ function getItemTipo(row: RowData) {
   return String(row.tipo || "venta")
 }
 
+function todayLocalDate() {
+  const d = new Date()
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, "0")
+  const day = String(d.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
 function formatDate(value: unknown) {
   if (!value) return "-"
 
@@ -142,15 +174,15 @@ function formatDate(value: unknown) {
   return d.toLocaleDateString("es-AR")
 }
 
-function formatDateTime(value: unknown) {
+function formatHour(value: unknown) {
   if (!value) return "-"
 
   const d = new Date(String(value))
-  if (Number.isNaN(d.getTime())) return String(value)
+  if (Number.isNaN(d.getTime())) return "-"
 
-  return d.toLocaleString("es-AR", {
-    dateStyle: "short",
-    timeStyle: "short"
+  return d.toLocaleTimeString("es-AR", {
+    hour: "2-digit",
+    minute: "2-digit"
   })
 }
 
@@ -185,18 +217,14 @@ export default function VisitsOverviewView() {
   const [rows, setRows] = useState<VisitRow[]>([])
   const [q, setQ] = useState("")
   const [fecha, setFecha] = useState("")
-  const [estado, setEstado] = useState("")
+  const [repartidorId, setRepartidorId] = useState("")
+  const [repartoId, setRepartoId] = useState("")
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [warning, setWarning] = useState<string | null>(null)
 
   const load = useCallback(async () => {
-    if (!session) {
-      setLoading(false)
-      return
-    }
-
-    const currentSession = session
+    if (!session) return
 
     setLoading(true)
     setError(null)
@@ -204,11 +232,11 @@ export default function VisitsOverviewView() {
 
     try {
       const [visitsPayload, customersPayload, runsPayload, employeesPayload, routesPayload] = await Promise.all([
-        apiGet(currentSession, "/api/admin/crud/delivery_visits?limit=1000&order_by=arrived_at&desc=true"),
-        apiGet(currentSession, "/api/admin/crud/customers?limit=1000&order_by=nombre"),
-        apiGet(currentSession, "/api/admin/crud/delivery_runs?limit=1000&order_by=fecha&desc=true"),
-        apiGet(currentSession, "/api/admin/crud/employees?limit=1000&order_by=nombre"),
-        apiGet(currentSession, "/api/admin/crud/delivery_routes?limit=1000&order_by=nombre")
+        apiGet(session, "/api/admin/crud/delivery_visits?limit=1000&order_by=arrived_at&desc=true"),
+        apiGet(session, "/api/admin/crud/customers?limit=1000&order_by=nombre"),
+        apiGet(session, "/api/admin/crud/delivery_runs?limit=1000&order_by=fecha&desc=true"),
+        apiGet(session, "/api/admin/crud/employees?limit=1000&order_by=nombre"),
+        apiGet(session, "/api/admin/crud/delivery_routes?limit=1000&order_by=nombre")
       ])
 
       const visits = unwrapData<RowData[]>(visitsPayload) || []
@@ -217,9 +245,9 @@ export default function VisitsOverviewView() {
       const employees = unwrapData<RowData[]>(employeesPayload) || []
       const routes = unwrapData<RowData[]>(routesPayload) || []
 
-      async function optionalRows(path: string, label: string): Promise<RowData[]> {
+      async function optionalRows(path: string, label: string) {
         try {
-          const payload = await apiGet(currentSession, path)
+          const payload = await apiGet(session, path)
           return unwrapData<RowData[]>(payload) || []
         } catch (exc) {
           console.warn(`No se pudo cargar ${label}`, exc)
@@ -229,7 +257,7 @@ export default function VisitsOverviewView() {
       }
 
       const [payments, movements, breadcrumbs, visitItems, products] = await Promise.all([
-        optionalRows("/api/admin/crud/payments?limit=1000&order_by=id", "pagos"),
+        optionalRows("/api/admin/crud/payments?limit=1000&order_by=created_at&desc=true", "pagos"),
         optionalRows("/api/admin/crud/customer_account_movements?limit=1000&order_by=fecha&desc=true", "cuentas corrientes"),
         optionalRows("/api/admin/crud/breadcrumb_account_movements?limit=1000&order_by=fecha&desc=true", "pan viejo"),
         optionalRows("/api/admin/crud/delivery_visit_items?limit=1000&order_by=id", "items de visita"),
@@ -246,30 +274,32 @@ export default function VisitsOverviewView() {
 
       for (const payment of payments) {
         const visitId = getPaymentVisitId(payment)
-
         if (!visitId) continue
         if (getPaymentEstado(payment) === "rechazado") continue
 
         paymentsByVisit.set(visitId, (paymentsByVisit.get(visitId) || 0) + getPaymentAmount(payment))
       }
 
-      const debtByVisit = new Map<string, number>()
+      const balanceByVisit = new Map<string, number>()
+      const salesMovementByVisit = new Map<string, number>()
 
       for (const movement of movements) {
         if (getMovementReferenceType(movement) !== "delivery_visit") continue
 
         const visitId = getMovementReferenceId(movement)
-
         if (!visitId) continue
 
-        debtByVisit.set(visitId, (debtByVisit.get(visitId) || 0) + getDebe(movement) - getHaber(movement))
+        balanceByVisit.set(visitId, (balanceByVisit.get(visitId) || 0) + getDebe(movement) - getHaber(movement))
+
+        if (getMovementTipo(movement) === "venta") {
+          salesMovementByVisit.set(visitId, (salesMovementByVisit.get(visitId) || 0) + getDebe(movement))
+        }
       }
 
       const breadByVisit = new Map<string, number>()
 
       for (const movement of breadcrumbs) {
         const visitId = getBreadcrumbVisitId(movement)
-
         if (!visitId) continue
 
         breadByVisit.set(visitId, (breadByVisit.get(visitId) || 0) + getKgEntrada(movement))
@@ -279,7 +309,6 @@ export default function VisitsOverviewView() {
 
       for (const item of visitItems) {
         const visitId = getItemVisitId(item)
-
         if (!visitId) continue
 
         if (!itemsByVisit.has(visitId)) {
@@ -308,29 +337,49 @@ export default function VisitsOverviewView() {
 
         const run = runById.get(runId)
         const customer = customerById.get(customerId)
-        const employee = run ? employeeById.get(getRunDriverId(run)) : undefined
-        const route = run ? routeById.get(getRunRouteId(run)) : undefined
+
+        const driverId = getRunDriverId(run)
+        const routeId = getRunRouteId(run)
+
+        const employee = run ? employeeById.get(driverId) : undefined
+        const route = run ? routeById.get(routeId) : undefined
 
         const itemSummary = itemsByVisit.get(visitId)
+
         const totalCobrado = paymentsByVisit.get(visitId) || 0
-        const deuda = debtByVisit.get(visitId) || 0
+        const balanceVisit = balanceByVisit.get(visitId) || 0
+        const deuda = Math.max(balanceVisit, 0)
+
         const totalItems = itemSummary?.total || 0
-        const totalVendido = totalItems > 0 ? totalItems : totalCobrado + deuda
+        const totalMovement = salesMovementByVisit.get(visitId) || 0
+
+        const totalVendido =
+          totalItems > 0
+            ? totalItems
+            : totalMovement > 0
+              ? totalMovement
+              : Math.max(totalCobrado + deuda, 0)
 
         const arrivedAt = String(visit.arrivedAt || visit.arrived_at || "")
-        const fecha = arrivedAt ? arrivedAt.slice(0, 10) : ""
+        const runTs = getRunCreatedAt(run) || arrivedAt
+        const fecha = String(run?.fecha || run?.date || (arrivedAt ? arrivedAt.slice(0, 10) : ""))
 
         return {
           id: visitId,
           fecha,
+          hora: formatHour(runTs),
+          sortTs: runTs || arrivedAt || fecha,
           arrivedAt,
           closedAt: String(visit.closedAt || visit.closed_at || ""),
           estado: String(visit.estado || "-"),
+
           repartoId: runId,
+          repartidorId: driverId,
+          repartidor: getName(employee) || driverId,
+          recorrido: getName(route) || routeId,
+
           cliente: getName(customer) || customerId,
           direccion: String(customer?.direccion || ""),
-          repartidor: getName(employee) || getRunDriverId(run),
-          recorrido: getName(route) || getRunRouteId(run),
           productos: itemSummary?.resumen?.join(", ") || "-",
           totalVendido,
           totalCobrado,
@@ -338,6 +387,16 @@ export default function VisitsOverviewView() {
           panViejoKg: breadByVisit.get(visitId) || 0,
           observaciones: String(visit.observaciones || "")
         }
+      })
+
+      nextRows.sort((a, b) => {
+        const byDate = String(b.fecha).localeCompare(String(a.fecha))
+        if (byDate !== 0) return byDate
+
+        const byTs = String(b.sortTs).localeCompare(String(a.sortTs))
+        if (byTs !== 0) return byTs
+
+        return String(b.arrivedAt).localeCompare(String(a.arrivedAt))
       })
 
       setRows(nextRows)
@@ -352,17 +411,68 @@ export default function VisitsOverviewView() {
     load()
   }, [load])
 
+  const repartidorOptions = useMemo(() => {
+    const map = new Map<string, string>()
+
+    for (const row of rows) {
+      if (!row.repartidorId) continue
+      map.set(row.repartidorId, row.repartidor || row.repartidorId)
+    }
+
+    return Array.from(map.entries())
+      .map(([id, nombre]) => ({ id, nombre }))
+      .sort((a, b) => a.nombre.localeCompare(b.nombre))
+  }, [rows])
+
+  const runOptions = useMemo<RunOption[]>(() => {
+    const map = new Map<string, RunOption>()
+
+    for (const row of rows) {
+      if (fecha && row.fecha !== fecha) continue
+      if (repartidorId && row.repartidorId !== repartidorId) continue
+
+      if (!map.has(row.repartoId)) {
+        map.set(row.repartoId, {
+          runId: row.repartoId,
+          fecha: row.fecha,
+          hora: row.hora,
+          sortTs: row.sortTs,
+          repartidor: row.repartidor,
+          repartidorId: row.repartidorId,
+          recorrido: row.recorrido,
+          estado: row.estado
+        })
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) => {
+      const byDate = String(b.fecha).localeCompare(String(a.fecha))
+      if (byDate !== 0) return byDate
+      return String(b.sortTs).localeCompare(String(a.sortTs))
+    })
+  }, [rows, fecha, repartidorId])
+
+  useEffect(() => {
+    if (!repartoId) return
+
+    if (!runOptions.some(option => option.runId === repartoId)) {
+      setRepartoId("")
+    }
+  }, [runOptions, repartoId])
+
   const filteredRows = useMemo(() => {
     const search = q.trim().toLowerCase()
 
     return rows.filter(row => {
       if (fecha && row.fecha !== fecha) return false
-      if (estado && row.estado !== estado) return false
+      if (repartidorId && row.repartidorId !== repartidorId) return false
+      if (repartoId && row.repartoId !== repartoId) return false
 
       if (!search) return true
 
       const text = [
         row.fecha,
+        row.hora,
         row.repartoId,
         row.cliente,
         row.direccion,
@@ -377,7 +487,7 @@ export default function VisitsOverviewView() {
 
       return text.includes(search)
     })
-  }, [rows, q, fecha, estado])
+  }, [rows, q, fecha, repartidorId, repartoId])
 
   const totalVendido = useMemo(() => filteredRows.reduce((sum, row) => sum + row.totalVendido, 0), [filteredRows])
   const totalCobrado = useMemo(() => filteredRows.reduce((sum, row) => sum + row.totalCobrado, 0), [filteredRows])
@@ -402,7 +512,6 @@ export default function VisitsOverviewView() {
       }
 
       const item = map.get(key)!
-
       item.visitas += 1
       item.vendido += row.totalVendido
       item.cobrado += row.totalCobrado
@@ -412,6 +521,17 @@ export default function VisitsOverviewView() {
 
     return Array.from(map.values()).sort((a, b) => b.visitas - a.visitas)
   }, [filteredRows])
+
+  function setTodayFilter() {
+    setFecha(todayLocalDate())
+  }
+
+  function clearFilters() {
+    setQ("")
+    setFecha("")
+    setRepartidorId("")
+    setRepartoId("")
+  }
 
   function exportRows() {
     downloadCsv(`visitas_reparto_${new Date().toISOString().slice(0, 10)}.csv`, filteredRows)
@@ -428,7 +548,7 @@ export default function VisitsOverviewView() {
           subtitle="Consulta rápida de visitas registradas por los repartidores."
           right={
             <div className="flex flex-wrap justify-end gap-2">
-              <div className="relative w-full sm:w-[300px]">
+              <div className="relative w-full sm:w-[280px]">
                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-zinc-400" />
                 <Input
                   value={q}
@@ -438,19 +558,46 @@ export default function VisitsOverviewView() {
                 />
               </div>
 
-              <Input
-                type="date"
-                value={fecha}
-                onChange={e => setFecha(e.target.value)}
-                className="w-full sm:w-[160px]"
-              />
-
-              <Select value={estado} onChange={e => setEstado(e.target.value)} className="w-full sm:w-[150px]">
-                <option value="">Todos</option>
-                <option value="cerrada">Cerradas</option>
-                <option value="abierta">Abiertas</option>
-                <option value="anulada">Anuladas</option>
+              <Select value={repartidorId} onChange={e => setRepartidorId(e.target.value)} className="w-full sm:w-[190px]">
+                <option value="">Todos los repartidores</option>
+                {repartidorOptions.map(option => (
+                  <option key={option.id} value={option.id}>
+                    {option.nombre}
+                  </option>
+                ))}
               </Select>
+
+              <div className="flex w-full gap-2 sm:w-auto">
+                <Input
+                  type="date"
+                  value={fecha}
+                  onChange={e => setFecha(e.target.value)}
+                  className="w-full sm:w-[160px]"
+                />
+
+                <Button
+                  type="button"
+                  variant={fecha === todayLocalDate() ? "primary" : "secondary"}
+                  onClick={setTodayFilter}
+                >
+                  Hoy
+                </Button>
+              </div>
+
+              <Select value={repartoId} onChange={e => setRepartoId(e.target.value)} className="w-full sm:w-[260px]">
+                <option value="">Todos los repartos</option>
+                {runOptions.map(option => (
+                  <option key={option.runId} value={option.runId}>
+                    {option.hora} · {option.repartidor} · {option.recorrido} · {option.estado}
+                  </option>
+                ))}
+              </Select>
+
+              {(q || fecha || repartidorId || repartoId) ? (
+                <Button variant="secondary" onClick={clearFilters}>
+                  Limpiar
+                </Button>
+              ) : null}
 
               <Button variant="secondary" onClick={load}>
                 <RefreshCw className="mr-2 h-4 w-4" /> Actualizar
@@ -505,7 +652,6 @@ export default function VisitsOverviewView() {
 
       <Card>
         <CardHeader title="Resumen por repartidor" subtitle="Totales según el filtro actual." />
-
         <CardBody className="p-0">
           {driverSummary.length === 0 ? (
             <div className="p-5">
@@ -560,6 +706,7 @@ export default function VisitsOverviewView() {
                 <thead className="border-b border-zinc-100 bg-zinc-50 text-xs font-medium text-zinc-500">
                   <tr>
                     <th className="px-4 py-3">Fecha</th>
+                    <th className="px-4 py-3">Hora</th>
                     <th className="px-4 py-3">Cliente</th>
                     <th className="px-4 py-3">Repartidor</th>
                     <th className="px-4 py-3">Recorrido</th>
@@ -569,7 +716,6 @@ export default function VisitsOverviewView() {
                     <th className="px-4 py-3">Deuda</th>
                     <th className="px-4 py-3">Pan viejo</th>
                     <th className="px-4 py-3">Estado</th>
-                    <th className="px-4 py-3">Hora</th>
                   </tr>
                 </thead>
 
@@ -577,6 +723,7 @@ export default function VisitsOverviewView() {
                   {filteredRows.map(row => (
                     <tr key={row.id} className="hover:bg-zinc-50">
                       <td className="px-4 py-3 text-zinc-700">{formatDate(row.fecha)}</td>
+                      <td className="px-4 py-3 text-zinc-700">{row.hora}</td>
 
                       <td className="px-4 py-3">
                         <div className="font-medium text-zinc-900">{row.cliente}</div>
@@ -596,8 +743,6 @@ export default function VisitsOverviewView() {
                           {row.estado}
                         </span>
                       </td>
-
-                      <td className="px-4 py-3 text-zinc-600">{formatDateTime(row.arrivedAt)}</td>
                     </tr>
                   ))}
                 </tbody>

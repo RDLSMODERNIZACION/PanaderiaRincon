@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { Download, Pencil, Plus, RefreshCw, Search, Trash2 } from "lucide-react"
 import Button from "@/components/ui/Button"
 import Input from "@/components/ui/Input"
+import Select from "@/components/ui/Select"
 import Modal from "@/components/ui/Modal"
 import { Card, CardBody, CardHeader } from "@/components/ui/Card"
 import { EmptyBlock, ErrorBlock, LoadingBlock } from "@/components/data/AsyncState"
@@ -26,6 +27,16 @@ type RunLookups = {
   routes: Record<string, string>
 }
 
+type RunMerchandiseFilter = "" | "assigned" | "unassigned"
+
+function todayLocalDate() {
+  const d = new Date()
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, "0")
+  const day = String(d.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
 function rowLabel(row: RowData) {
   return String(row.nombre || row.name || row.email || row.id || "")
 }
@@ -41,7 +52,11 @@ function formatDate(value: unknown) {
 
   const d = new Date(text)
   if (Number.isNaN(d.getTime())) return text
-  return d.toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" })
+
+  return d.toLocaleString("es-AR", {
+    dateStyle: "short",
+    timeStyle: "short"
+  })
 }
 
 function isActive(row: RowData) {
@@ -58,15 +73,52 @@ function runRouteId(row: RowData) {
   return String(row.route_id || row.routeId || "")
 }
 
+function runDate(row: RowData) {
+  return String(row.fecha || row.date || "")
+}
+
+function runCreatedAt(row: RowData) {
+  return String(row.created_at || row.createdAt || "")
+}
+
+function sortRunsNewestFirst(rows: RowData[]) {
+  return [...rows].sort((a, b) => {
+    const byDate = runDate(b).localeCompare(runDate(a))
+    if (byDate !== 0) return byDate
+
+    const byCreated = runCreatedAt(b).localeCompare(runCreatedAt(a))
+    if (byCreated !== 0) return byCreated
+
+    return String(b.id || "").localeCompare(String(a.id || ""))
+  })
+}
+
+function runHasStock(row: RowData, stockByRun: Record<string, RunStockSummary>) {
+  const id = String(row.id || "")
+  return Boolean(stockByRun[id]?.count && stockByRun[id].count > 0)
+}
+
 function runStockStatus(summary?: RunStockSummary) {
   if (!summary || summary.count === 0) {
-    return { label: "Sin asignar", className: "bg-amber-100 text-amber-800" }
+    return {
+      label: "Sin asignar",
+      className: "bg-amber-100 text-amber-800"
+    }
   }
 
   return {
     label: `${summary.count} producto${summary.count === 1 ? "" : "s"}`,
     className: "bg-emerald-100 text-emerald-700"
   }
+}
+
+function createFieldsForTable(tableName: string, meta: TableMeta) {
+  if (tableName !== "delivery_runs") return meta.allowedCreate
+
+  return meta.allowedCreate.filter(field => {
+    const normalized = String(field).toLowerCase()
+    return normalized !== "fecha" && normalized !== "date"
+  })
 }
 
 function RoutesTable({
@@ -96,17 +148,38 @@ function RoutesTable({
             <th className="px-4 py-3 text-right">Acciones</th>
           </tr>
         </thead>
+
         <tbody className="divide-y divide-zinc-100">
           {rows.map(row => (
-            <tr key={String(row.id)} className="cursor-pointer transition hover:bg-zinc-50" onClick={() => onOpen(row)}>
-              <td className="px-4 py-3 font-mono text-xs text-zinc-600">{String(row.id || "-")}</td>
-              <td className="px-4 py-3 font-medium text-zinc-900">{rowLabel(row)}</td>
+            <tr
+              key={String(row.id)}
+              className="cursor-pointer transition hover:bg-zinc-50"
+              onClick={() => onOpen(row)}
+            >
+              <td className="px-4 py-3 font-mono text-xs text-zinc-600">
+                {String(row.id || "-")}
+              </td>
+
+              <td className="px-4 py-3 font-medium text-zinc-900">
+                {rowLabel(row)}
+              </td>
+
               <td className="px-4 py-3">
-                <span className={`rounded-full px-2 py-1 text-xs font-medium ${isActive(row) ? "bg-emerald-100 text-emerald-700" : "bg-zinc-100 text-zinc-600"}`}>
+                <span
+                  className={`rounded-full px-2 py-1 text-xs font-medium ${
+                    isActive(row)
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "bg-zinc-100 text-zinc-600"
+                  }`}
+                >
                   {isActive(row) ? "Sí" : "No"}
                 </span>
               </td>
-              <td className="px-4 py-3 text-zinc-600">{formatDate(row.created_at || row.createdAt)}</td>
+
+              <td className="px-4 py-3 text-zinc-600">
+                {formatDate(row.created_at || row.createdAt)}
+              </td>
+
               <td className="px-4 py-3">
                 <div className="flex justify-end gap-2">
                   {canWrite ? (
@@ -180,6 +253,7 @@ function RunsTable({
             <th className="px-4 py-3 text-right">Acciones</th>
           </tr>
         </thead>
+
         <tbody className="divide-y divide-zinc-100">
           {rows.map(row => {
             const id = String(row.id)
@@ -188,22 +262,43 @@ function RunsTable({
             const stock = runStockStatus(stockByRun[id])
 
             return (
-              <tr key={id} className="cursor-pointer transition hover:bg-zinc-50" onClick={() => onOpen(row)}>
-                <td className="px-4 py-3 font-mono text-xs text-zinc-600">{id}</td>
-                <td className="px-4 py-3 text-zinc-700">{formatDate(row.fecha || row.date)}</td>
-                <td className="px-4 py-3 font-medium text-zinc-900">{lookups.employees[driverId] || driverId || "-"}</td>
-                <td className="px-4 py-3 text-zinc-700">{lookups.routes[routeId] || routeId || "-"}</td>
+              <tr
+                key={id}
+                className="cursor-pointer transition hover:bg-zinc-50"
+                onClick={() => onOpen(row)}
+              >
+                <td className="px-4 py-3 font-mono text-xs text-zinc-600">
+                  {id}
+                </td>
+
+                <td className="px-4 py-3 text-zinc-700">
+                  {formatDate(row.fecha || row.date)}
+                </td>
+
+                <td className="px-4 py-3 font-medium text-zinc-900">
+                  {lookups.employees[driverId] || driverId || "-"}
+                </td>
+
+                <td className="px-4 py-3 text-zinc-700">
+                  {lookups.routes[routeId] || routeId || "-"}
+                </td>
+
                 <td className="px-4 py-3">
                   <span className="rounded-full bg-zinc-900 px-2 py-1 text-xs font-medium text-white">
                     {String(row.estado || "-")}
                   </span>
                 </td>
+
                 <td className="px-4 py-3">
                   <span className={`rounded-full px-2 py-1 text-xs font-medium ${stock.className}`}>
                     {stock.label}
                   </span>
                 </td>
-                <td className="px-4 py-3 text-zinc-600">{formatDate(row.created_at || row.createdAt)}</td>
+
+                <td className="px-4 py-3 text-zinc-600">
+                  {formatDate(row.created_at || row.createdAt)}
+                </td>
+
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-2">
                     {canWrite ? (
@@ -256,21 +351,29 @@ export default function CrudTableView({
   embedded?: boolean
 }) {
   const { session, can } = useAuth()
+
   const [meta, setMeta] = useState<TableMeta | null>(null)
   const [rows, setRows] = useState<RowData[]>([])
   const [q, setQ] = useState("")
   const [includeInactive, setIncludeInactive] = useState(false)
+
+  const [runDriverFilter, setRunDriverFilter] = useState("")
+  const [runMerchandiseFilter, setRunMerchandiseFilter] = useState<RunMerchandiseFilter>("")
+
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
   const [editRow, setEditRow] = useState<RowData | null>(null)
   const [creating, setCreating] = useState(false)
   const [selectedRoute, setSelectedRoute] = useState<RowData | null>(null)
   const [selectedRun, setSelectedRun] = useState<RowData | null>(null)
+
   const [stockByRun, setStockByRun] = useState<Record<string, RunStockSummary>>({})
   const [runLookups, setRunLookups] = useState<RunLookups>({ employees: {}, routes: {} })
 
   const canWrite = can("admin.crud.write", `${tableName}.write`)
   const canDelete = can("admin.crud.delete", `${tableName}.delete`)
+
   const isRoutesTable = tableName === "delivery_routes"
   const isRunsTable = tableName === "delivery_runs"
 
@@ -285,76 +388,129 @@ export default function CrudTableView({
       const metas = unwrapData<TableMeta[]>(tablesPayload) || []
       const found = metas.find(t => t.table === tableName)
 
-      if (!found) throw new Error(`La tabla ${tableName} no está habilitada en /api/admin/crud/tables`)
+      if (!found) {
+        throw new Error(`La tabla ${tableName} no está habilitada en /api/admin/crud/tables`)
+      }
 
       setMeta(found)
 
       const query = buildQuery({
         q,
         include_inactive: includeInactive,
-        limit: 200,
-        order_by: found.defaultOrderBy || undefined
+        limit: 500,
+        order_by: isRunsTable ? "fecha" : found.defaultOrderBy || undefined,
+        desc: isRunsTable ? true : undefined
       })
 
       const rowsPayload = await apiGet(session, `/api/admin/crud/${tableName}${query}`)
       const loadedRows = unwrapData<RowData[]>(rowsPayload) || []
-      setRows(loadedRows)
 
-      if (tableName === "delivery_runs") {
-  try {
-    const [stockPayload, employeesPayload, routesPayload] = await Promise.all([
-      apiGet(session, "/api/admin/crud/delivery_run_stock?limit=1000"),
-      apiGet(session, "/api/admin/crud/employees?limit=1000"),
-      apiGet(session, "/api/admin/crud/delivery_routes?limit=1000")
-    ])
+      setRows(isRunsTable ? sortRunsNewestFirst(loadedRows) : loadedRows)
 
-    const stockRows = unwrapData<RowData[]>(stockPayload) || []
-    const employees = unwrapData<RowData[]>(employeesPayload) || []
-    const routes = unwrapData<RowData[]>(routesPayload) || []
+      if (isRunsTable) {
+        try {
+          const [stockPayload, employeesPayload, routesPayload] = await Promise.all([
+            apiGet(session, "/api/admin/crud/delivery_run_stock?limit=1000"),
+            apiGet(session, "/api/admin/crud/employees?limit=1000"),
+            apiGet(session, "/api/admin/crud/delivery_routes?limit=1000")
+          ])
 
-    const nextStock: Record<string, RunStockSummary> = {}
+          const stockRows = unwrapData<RowData[]>(stockPayload) || []
+          const employees = unwrapData<RowData[]>(employeesPayload) || []
+          const routes = unwrapData<RowData[]>(routesPayload) || []
 
-    for (const stock of stockRows) {
-      const runId = String(stock.delivery_run_id || stock.deliveryRunId || "")
-      if (!runId) continue
+          const nextStock: Record<string, RunStockSummary> = {}
 
-      const cantidad = Number(stock.cantidad_cargada || stock.cantidadCargada || 0)
-      if (!nextStock[runId]) nextStock[runId] = { count: 0, total: 0 }
-      nextStock[runId].count += 1
-      nextStock[runId].total += Number.isFinite(cantidad) ? cantidad : 0
-    }
+          for (const stock of stockRows) {
+            const runId = String(stock.delivery_run_id || stock.deliveryRunId || "")
+            if (!runId) continue
 
-    setStockByRun(nextStock)
-    setRunLookups({
-      employees: Object.fromEntries(employees.map(employee => [String(employee.id), rowLabel(employee)])),
-      routes: Object.fromEntries(routes.map(route => [String(route.id), rowLabel(route)]))
-    })
-  } catch (lookupError) {
-    console.warn("No se pudieron cargar datos extra de repartos", lookupError)
-    setStockByRun({})
-    setRunLookups({ employees: {}, routes: {} })
-  }
-}
+            const cantidad = Number(stock.cantidad_cargada || stock.cantidadCargada || 0)
+
+            if (!nextStock[runId]) {
+              nextStock[runId] = { count: 0, total: 0 }
+            }
+
+            nextStock[runId].count += 1
+            nextStock[runId].total += Number.isFinite(cantidad) ? cantidad : 0
+          }
+
+          setStockByRun(nextStock)
+          setRunLookups({
+            employees: Object.fromEntries(employees.map(employee => [String(employee.id), rowLabel(employee)])),
+            routes: Object.fromEntries(routes.map(route => [String(route.id), rowLabel(route)]))
+          })
+        } catch (lookupError) {
+          console.warn("No se pudieron cargar datos extra de repartos", lookupError)
+          setStockByRun({})
+          setRunLookups({ employees: {}, routes: {} })
+        }
+      }
     } catch (exc: any) {
       setError(exc?.message || "No se pudo cargar la tabla")
     } finally {
       setLoading(false)
     }
-  }, [session, tableName, q, includeInactive])
+  }, [session, tableName, q, includeInactive, isRunsTable])
 
   useEffect(() => {
     load()
   }, [load])
 
+  const runDriverOptions = useMemo(() => {
+    const map = new Map<string, string>()
+
+    for (const row of rows) {
+      const driverId = runDriverId(row)
+      if (!driverId) continue
+
+      map.set(driverId, runLookups.employees[driverId] || driverId)
+    }
+
+    return Array.from(map.entries())
+      .map(([id, label]) => ({ id, label }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+  }, [rows, runLookups])
+
+  const displayedRows = useMemo(() => {
+    if (!isRunsTable) return rows
+
+    return sortRunsNewestFirst(rows).filter(row => {
+      if (runDriverFilter && runDriverId(row) !== runDriverFilter) return false
+
+      if (runMerchandiseFilter === "assigned" && !runHasStock(row, stockByRun)) return false
+      if (runMerchandiseFilter === "unassigned" && runHasStock(row, stockByRun)) return false
+
+      return true
+    })
+  }, [rows, isRunsTable, runDriverFilter, runMerchandiseFilter, stockByRun])
+
+  function clearRunFilters() {
+    setRunDriverFilter("")
+    setRunMerchandiseFilter("")
+  }
+
   async function createRow(payload: RowData) {
     if (!session) return
-    await apiPost(session, `/api/admin/crud/${tableName}`, payload)
+
+    const finalPayload: RowData = { ...payload }
+
+    if (tableName === "delivery_runs") {
+      finalPayload.fecha = todayLocalDate()
+
+      if (!finalPayload.estado) {
+        finalPayload.estado = "preparado"
+      }
+    }
+
+    await apiPost(session, `/api/admin/crud/${tableName}`, finalPayload)
     setCreating(false)
     await load()
   }
 
   async function updateRow(payload: RowData) {
     if (!session || !editRow?.id) return
+
     await apiPatch(session, `/api/admin/crud/${tableName}/${encodeURIComponent(String(editRow.id))}`, payload)
     setEditRow(null)
     await load()
@@ -371,7 +527,7 @@ export default function CrudTableView({
   }
 
   function exportRows() {
-    downloadCsv(`${tableName}_${new Date().toISOString().slice(0, 10)}.csv`, rows)
+    downloadCsv(`${tableName}_${new Date().toISOString().slice(0, 10)}.csv`, displayedRows)
   }
 
   const body = useMemo(() => {
@@ -379,11 +535,12 @@ export default function CrudTableView({
     if (error) return <ErrorBlock error={error} onRetry={load} />
     if (!meta) return <EmptyBlock label="No se encontró configuración de tabla." />
     if (rows.length === 0) return <EmptyBlock label="No hay registros para mostrar." />
+    if (displayedRows.length === 0) return <EmptyBlock label="No hay registros para esos filtros." />
 
     if (isRoutesTable) {
       return (
         <RoutesTable
-          rows={rows}
+          rows={displayedRows}
           onOpen={setSelectedRoute}
           onEdit={setEditRow}
           onDelete={deleteRow}
@@ -396,7 +553,7 @@ export default function CrudTableView({
     if (isRunsTable) {
       return (
         <RunsTable
-          rows={rows}
+          rows={displayedRows}
           stockByRun={stockByRun}
           lookups={runLookups}
           onOpen={setSelectedRun}
@@ -411,14 +568,27 @@ export default function CrudTableView({
     return (
       <CrudDataTable
         meta={meta}
-        rows={rows}
+        rows={displayedRows}
         onEdit={setEditRow}
         onDelete={deleteRow}
         canWrite={canWrite}
         canDelete={canDelete}
       />
     )
-  }, [loading, error, meta, rows, load, canWrite, canDelete, isRoutesTable, isRunsTable, stockByRun, runLookups])
+  }, [
+    loading,
+    error,
+    meta,
+    rows,
+    displayedRows,
+    load,
+    canWrite,
+    canDelete,
+    isRoutesTable,
+    isRunsTable,
+    stockByRun,
+    runLookups
+  ])
 
   const content = (
     <>
@@ -437,31 +607,76 @@ export default function CrudTableView({
             <div className="flex flex-wrap justify-end gap-2">
               <div className="relative w-full sm:w-[260px]">
                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-zinc-400" />
-                <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar..." className="pl-9" />
+                <Input
+                  value={q}
+                  onChange={e => setQ(e.target.value)}
+                  placeholder="Buscar..."
+                  className="pl-9"
+                />
               </div>
 
+              {isRunsTable ? (
+                <>
+                  <Select
+                    value={runDriverFilter}
+                    onChange={e => setRunDriverFilter(e.target.value)}
+                    className="w-full sm:w-[210px]"
+                  >
+                    <option value="">Todos los repartidores</option>
+                    {runDriverOptions.map(option => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </Select>
+
+                  <Select
+                    value={runMerchandiseFilter}
+                    onChange={e => setRunMerchandiseFilter(e.target.value as RunMerchandiseFilter)}
+                    className="w-full sm:w-[190px]"
+                  >
+                    <option value="">Toda la mercadería</option>
+                    <option value="assigned">Con mercadería</option>
+                    <option value="unassigned">Sin mercadería</option>
+                  </Select>
+
+                  {(runDriverFilter || runMerchandiseFilter) ? (
+                    <Button variant="secondary" onClick={clearRunFilters}>
+                      Limpiar
+                    </Button>
+                  ) : null}
+                </>
+              ) : null}
+
               {meta?.softDeleteColumn ? (
-                <Button variant={includeInactive ? "primary" : "secondary"} onClick={() => setIncludeInactive(v => !v)}>
+                <Button
+                  variant={includeInactive ? "primary" : "secondary"}
+                  onClick={() => setIncludeInactive(v => !v)}
+                >
                   Inactivos
                 </Button>
               ) : null}
 
               <Button variant="secondary" onClick={load}>
-                <RefreshCw className="mr-2 h-4 w-4" /> Actualizar
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Actualizar
               </Button>
 
               <Button variant="secondary" onClick={exportRows}>
-                <Download className="mr-2 h-4 w-4" /> CSV
+                <Download className="mr-2 h-4 w-4" />
+                CSV
               </Button>
 
               {meta && !meta.readOnly && canWrite ? (
                 <Button onClick={() => setCreating(true)}>
-                  <Plus className="mr-2 h-4 w-4" /> Nuevo
+                  <Plus className="mr-2 h-4 w-4" />
+                  Nuevo
                 </Button>
               ) : null}
             </div>
           }
         />
+
         <CardBody className="p-0">{body}</CardBody>
       </Card>
 
@@ -469,7 +684,7 @@ export default function CrudTableView({
         {meta ? (
           <CrudForm
             mode="create"
-            fields={meta.allowedCreate}
+            fields={createFieldsForTable(tableName, meta)}
             onSubmit={createRow}
             onCancel={() => setCreating(false)}
             submitLabel="Crear"
@@ -513,5 +728,6 @@ export default function CrudTableView({
   )
 
   if (embedded) return content
+
   return <div className="space-y-6">{content}</div>
 }
