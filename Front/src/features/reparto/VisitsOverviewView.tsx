@@ -144,9 +144,14 @@ function formatDate(value: unknown) {
 
 function formatDateTime(value: unknown) {
   if (!value) return "-"
+
   const d = new Date(String(value))
   if (Number.isNaN(d.getTime())) return String(value)
-  return d.toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" })
+
+  return d.toLocaleString("es-AR", {
+    dateStyle: "short",
+    timeStyle: "short"
+  })
 }
 
 function money(value: number) {
@@ -186,7 +191,12 @@ export default function VisitsOverviewView() {
   const [warning, setWarning] = useState<string | null>(null)
 
   const load = useCallback(async () => {
-    if (!session) return
+    if (!session) {
+      setLoading(false)
+      return
+    }
+
+    const currentSession = session
 
     setLoading(true)
     setError(null)
@@ -194,11 +204,11 @@ export default function VisitsOverviewView() {
 
     try {
       const [visitsPayload, customersPayload, runsPayload, employeesPayload, routesPayload] = await Promise.all([
-        apiGet(session, "/api/admin/crud/delivery_visits?limit=1000&order_by=arrived_at&desc=true"),
-        apiGet(session, "/api/admin/crud/customers?limit=1000&order_by=nombre"),
-        apiGet(session, "/api/admin/crud/delivery_runs?limit=1000&order_by=fecha&desc=true"),
-        apiGet(session, "/api/admin/crud/employees?limit=1000&order_by=nombre"),
-        apiGet(session, "/api/admin/crud/delivery_routes?limit=1000&order_by=nombre")
+        apiGet(currentSession, "/api/admin/crud/delivery_visits?limit=1000&order_by=arrived_at&desc=true"),
+        apiGet(currentSession, "/api/admin/crud/customers?limit=1000&order_by=nombre"),
+        apiGet(currentSession, "/api/admin/crud/delivery_runs?limit=1000&order_by=fecha&desc=true"),
+        apiGet(currentSession, "/api/admin/crud/employees?limit=1000&order_by=nombre"),
+        apiGet(currentSession, "/api/admin/crud/delivery_routes?limit=1000&order_by=nombre")
       ])
 
       const visits = unwrapData<RowData[]>(visitsPayload) || []
@@ -207,9 +217,9 @@ export default function VisitsOverviewView() {
       const employees = unwrapData<RowData[]>(employeesPayload) || []
       const routes = unwrapData<RowData[]>(routesPayload) || []
 
-      async function optionalRows(path: string, label: string) {
+      async function optionalRows(path: string, label: string): Promise<RowData[]> {
         try {
-          const payload = await apiGet(session, path)
+          const payload = await apiGet(currentSession, path)
           return unwrapData<RowData[]>(payload) || []
         } catch (exc) {
           console.warn(`No se pudo cargar ${label}`, exc)
@@ -233,31 +243,43 @@ export default function VisitsOverviewView() {
       const productById = new Map(products.map(product => [getId(product), product]))
 
       const paymentsByVisit = new Map<string, number>()
+
       for (const payment of payments) {
         const visitId = getPaymentVisitId(payment)
+
         if (!visitId) continue
         if (getPaymentEstado(payment) === "rechazado") continue
+
         paymentsByVisit.set(visitId, (paymentsByVisit.get(visitId) || 0) + getPaymentAmount(payment))
       }
 
       const debtByVisit = new Map<string, number>()
+
       for (const movement of movements) {
         if (getMovementReferenceType(movement) !== "delivery_visit") continue
+
         const visitId = getMovementReferenceId(movement)
+
         if (!visitId) continue
+
         debtByVisit.set(visitId, (debtByVisit.get(visitId) || 0) + getDebe(movement) - getHaber(movement))
       }
 
       const breadByVisit = new Map<string, number>()
+
       for (const movement of breadcrumbs) {
         const visitId = getBreadcrumbVisitId(movement)
+
         if (!visitId) continue
+
         breadByVisit.set(visitId, (breadByVisit.get(visitId) || 0) + getKgEntrada(movement))
       }
 
       const itemsByVisit = new Map<string, { total: number; resumen: string[] }>()
+
       for (const item of visitItems) {
         const visitId = getItemVisitId(item)
+
         if (!visitId) continue
 
         if (!itemsByVisit.has(visitId)) {
@@ -380,6 +402,7 @@ export default function VisitsOverviewView() {
       }
 
       const item = map.get(key)!
+
       item.visitas += 1
       item.vendido += row.totalVendido
       item.cobrado += row.totalCobrado
@@ -482,6 +505,7 @@ export default function VisitsOverviewView() {
 
       <Card>
         <CardHeader title="Resumen por repartidor" subtitle="Totales según el filtro actual." />
+
         <CardBody className="p-0">
           {driverSummary.length === 0 ? (
             <div className="p-5">
@@ -553,10 +577,12 @@ export default function VisitsOverviewView() {
                   {filteredRows.map(row => (
                     <tr key={row.id} className="hover:bg-zinc-50">
                       <td className="px-4 py-3 text-zinc-700">{formatDate(row.fecha)}</td>
+
                       <td className="px-4 py-3">
                         <div className="font-medium text-zinc-900">{row.cliente}</div>
                         {row.direccion ? <div className="mt-1 text-xs text-zinc-500">{row.direccion}</div> : null}
                       </td>
+
                       <td className="px-4 py-3 text-zinc-700">{row.repartidor || "-"}</td>
                       <td className="px-4 py-3 text-zinc-700">{row.recorrido || "-"}</td>
                       <td className="max-w-[260px] px-4 py-3 text-zinc-700">{row.productos}</td>
@@ -564,11 +590,13 @@ export default function VisitsOverviewView() {
                       <td className="px-4 py-3 text-zinc-900">{money(row.totalCobrado)}</td>
                       <td className="px-4 py-3 text-zinc-900">{money(row.deuda)}</td>
                       <td className="px-4 py-3 text-zinc-700">{qty(row.panViejoKg)} kg</td>
+
                       <td className="px-4 py-3">
                         <span className={`rounded-full px-2 py-1 text-xs font-medium ${estadoClass(row.estado)}`}>
                           {row.estado}
                         </span>
                       </td>
+
                       <td className="px-4 py-3 text-zinc-600">{formatDateTime(row.arrivedAt)}</td>
                     </tr>
                   ))}
