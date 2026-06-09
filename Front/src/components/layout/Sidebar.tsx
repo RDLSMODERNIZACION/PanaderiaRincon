@@ -11,7 +11,6 @@ import {
   Home,
   Route,
   Shield,
-  ShoppingCart,
   Truck,
   Users,
   WalletCards
@@ -38,9 +37,7 @@ const navGroups = [
     items: [
       { href: "/cuentas", label: "Cuentas", icon: WalletCards, perms: ["admin.menu"] },
       { href: "/clientes", label: "Clientes", icon: Users, perms: ["admin.menu"] },
-      { href: "/ventas", label: "Ventas", icon: ShoppingCart, perms: ["admin.menu"] },
-      { href: "/productos", label: "Productos", icon: Coffee, perms: ["admin.menu"] },
-      { href: "/personal", label: "Personal", icon: Users, perms: ["admin.menu"] }
+      { href: "/productos", label: "Productos", icon: Coffee, perms: ["admin.menu"] }
     ]
   },
   {
@@ -106,7 +103,10 @@ export default function Sidebar() {
 
             <div className="space-y-1">
               {group.items.map(item => {
-                const active = pathname === item.href || (item.href !== "/" && pathname?.startsWith(item.href))
+                const active =
+                  pathname === item.href ||
+                  (item.href !== "/" && pathname?.startsWith(item.href))
+
                 const Icon = item.icon
 
                 return (
