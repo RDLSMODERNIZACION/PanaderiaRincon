@@ -7,6 +7,13 @@ import { cleanApiBaseUrl } from "@/lib/utils"
 type AuthUser = {
   userId?: string | null
   user_id?: string | null
+  id?: string | null
+  nombre?: string | null
+  name?: string | null
+  username?: string | null
+  email?: string | null
+  fullName?: string | null
+  full_name?: string | null
   roleId?: string | null
   role_id?: string | null
   roleName?: string | null
@@ -47,7 +54,11 @@ const STORAGE_KEY = "panaderia_rincon_session_v1"
 const AuthContext = createContext<AuthContextType | null>(null)
 
 function defaultApiBaseUrl() {
-  return cleanApiBaseUrl(process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL || "https://panaderia-backend-vrfl.onrender.com")
+  return cleanApiBaseUrl(
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+      process.env.NEXT_PUBLIC_API_URL ||
+      "https://panaderia-backend-vrfl.onrender.com"
+  )
 }
 
 function normalizeApiBaseUrl(value?: string) {
@@ -59,10 +70,20 @@ function getUserId(data: AuthUser | any): string | undefined {
 }
 
 function normalizeUser(data: AuthUser): AuthUser {
+  const nombre =
+    data.nombre ||
+    data.name ||
+    data.fullName ||
+    data.full_name ||
+    data.username ||
+    data.email ||
+    null
+
   return {
     ...data,
-    userId: data.userId || data.user_id || null,
-    user_id: data.user_id || data.userId || null,
+    userId: data.userId || data.user_id || data.id || null,
+    user_id: data.user_id || data.userId || data.id || null,
+    nombre,
     roleId: data.roleId || data.role_id || null,
     role_id: data.role_id || data.roleId || null,
     roleName: data.roleName || data.role_name || null,
@@ -77,7 +98,10 @@ function normalizeUser(data: AuthUser): AuthUser {
 
 function sessionFromUser(apiBaseUrl: string, data: AuthUser | any): ApiSession {
   const userId = getUserId(data)
-  if (!userId) throw new Error("El backend no devolvió userId.")
+
+  if (!userId) {
+    throw new Error("El backend no devolvió userId.")
+  }
 
   return {
     apiBaseUrl,
@@ -159,6 +183,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(newSession)
       setUser(meData)
       setError(null)
+
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(newSession))
     } catch (exc: any) {
       setError(exc?.message || "No se pudo iniciar sesión")
@@ -204,15 +229,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  const can = useCallback((...permissions: string[]) => {
-    const p = user?.permissions || []
+  const can = useCallback(
+    (...permissions: string[]) => {
+      const p = user?.permissions || []
 
-    if (p.includes("*")) return true
-    if (user?.isDevelopmentOpen || user?.is_development_open) return true
-    if (permissions.length === 0) return true
+      if (p.includes("*")) return true
+      if (user?.isDevelopmentOpen || user?.is_development_open) return true
+      if (permissions.length === 0) return true
 
-    return permissions.some(permission => p.includes(permission))
-  }, [user])
+      return permissions.some((permission) => p.includes(permission))
+    },
+    [user]
+  )
 
   const value = useMemo<AuthContextType>(
     () => ({
@@ -234,7 +262,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 export function useAuth() {
   const ctx = useContext(AuthContext)
-  if (!ctx) throw new Error("useAuth debe usarse dentro de AuthProvider")
+
+  if (!ctx) {
+    throw new Error("useAuth debe usarse dentro de AuthProvider")
+  }
+
   return ctx
 }
 
