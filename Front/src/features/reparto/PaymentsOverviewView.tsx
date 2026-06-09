@@ -137,20 +137,29 @@ export default function PaymentsOverviewView() {
   const [error, setError] = useState<string | null>(null)
   const [warning, setWarning] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    if (!session) return
+ const load = useCallback(async () => {
+  if (!session) {
+    setLoading(false)
+    return
+  }
 
-    setLoading(true)
-    setError(null)
-    setWarning(null)
+  const currentSession = session
 
-    try {
-      const paymentsPayload = await apiGet(session, "/api/admin/crud/payments?limit=1000&order_by=created_at&desc=true")
-      const payments = unwrapData<RowData[]>(paymentsPayload) || []
+  setLoading(true)
+  setError(null)
+  setWarning(null)
 
-      async function optionalRows(path: string, label: string) {
-        try {
-          const payload = await apiGet(session, path)
+  try {
+    const paymentsPayload = await apiGet(
+      currentSession,
+      "/api/admin/crud/payments?limit=1000&order_by=created_at&desc=true"
+    )
+
+    const payments = unwrapData<RowData[]>(paymentsPayload) || []
+
+    async function optionalRows(path: string, label: string): Promise<RowData[]> {
+      try {
+        const payload = await apiGet(currentSession, path)
           return unwrapData<RowData[]>(payload) || []
         } catch (exc) {
           console.warn(`No se pudo cargar ${label}`, exc)
