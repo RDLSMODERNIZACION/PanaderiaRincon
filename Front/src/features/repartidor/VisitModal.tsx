@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Minus, Plus, Save, Trash2, X } from "lucide-react"
+import { Minus, Plus, Save, X } from "lucide-react"
 import Button from "@/components/ui/Button"
 import Input from "@/components/ui/Input"
 import Select from "@/components/ui/Select"
@@ -27,15 +27,6 @@ type RepartidorCustomer = {
   nombre?: string
   direccion?: string | null
   telefono?: string | null
-  deudaActual?: number
-  deuda_actual?: number
-}
-
-type PaymentDraft = {
-  id: string
-  metodo: string
-  amount: string
-  referencia?: string
 }
 
 type Props = {
@@ -73,11 +64,6 @@ function customerId(customer: RepartidorCustomer | null) {
   return String(customer?.customerId || customer?.customer_id || "")
 }
 
-function customerDebt(customer: RepartidorCustomer | null) {
-  const n = Number(customer?.deudaActual ?? customer?.deuda_actual ?? 0)
-  return Number.isFinite(n) ? Math.max(n, 0) : 0
-}
-
 function numberFromInput(value: string) {
   if (value.trim() === "") return 0
   const n = Number(value)
@@ -110,15 +96,6 @@ function money(value: number) {
   })}`
 }
 
-function newPaymentDraft(): PaymentDraft {
-  return {
-    id: `pay_${Date.now()}_${Math.random().toString(16).slice(2)}`,
-    metodo: "efectivo",
-    amount: "0",
-    referencia: ""
-  }
-}
-
 export default function VisitModal({
   open,
   runId,
@@ -134,7 +111,8 @@ export default function VisitModal({
 
   const [quantities, setQuantities] = useState<Record<string, string>>({})
   const [panViejoKg, setPanViejoKg] = useState("0")
-  const [payments, setPayments] = useState<PaymentDraft[]>([newPaymentDraft()])
+  const [metodo, setMetodo] = useState("efectivo")
+  const [montoPagado, setMontoPagado] = useState("0")
   const [showNotes, setShowNotes] = useState(false)
   const [observaciones, setObservaciones] = useState("")
   const [saving, setSaving] = useState(false)
@@ -151,15 +129,12 @@ export default function VisitModal({
 
     setQuantities(next)
     setPanViejoKg("0")
-    setPayments([newPaymentDraft()])
+    setMetodo("efectivo")
+    setMontoPagado("0")
     setShowNotes(false)
     setObservaciones("")
     setError(null)
   }, [open, safeStock])
-
-  const deudaAnterior = useMemo(() => {
-    return customerDebt(customer)
-  }, [customer])
 
   const computedTotal = useMemo(() => {
     return safeStock.reduce((sum, item) => {
@@ -171,26 +146,6 @@ export default function VisitModal({
       return sum + cantidad * price
     }, 0)
   }, [safeStock, quantities])
-
-  const totalACobrar = useMemo(() => {
-    return deudaAnterior + computedTotal
-  }, [deudaAnterior, computedTotal])
-
-  const totalPagado = useMemo(() => {
-    return payments.reduce((sum, payment) => {
-      const amount = numberFromInput(payment.amount)
-      if (!Number.isFinite(amount) || amount <= 0) return sum
-      return sum + amount
-    }, 0)
-  }, [payments])
-
-  const saldoPendiente = useMemo(() => {
-    return Math.max(totalACobrar - totalPagado, 0)
-  }, [totalACobrar, totalPagado])
-
-  const pagoExcedido = useMemo(() => {
-    return totalPagado > totalACobrar + 0.0001
-  }, [totalPagado, totalACobrar])
 
   const hasDeliveredQuantity = useMemo(() => {
     return safeStock.some(item => {
@@ -207,6 +162,13 @@ export default function VisitModal({
       return Number.isFinite(cantidad) && cantidad > 0 && productPrice(item) <= 0
     })
   }, [safeStock, quantities])
+
+  const deuda = useMemo(() => {
+    const paid = numberFromInput(montoPagado)
+
+    if (!Number.isFinite(paid)) return 0
+    return Math.max(computedTotal - paid, 0)
+  }, [computedTotal, montoPagado])
 
   function setProductQuantity(item: RepartidorStock, value: string) {
     const id = productId(item)
@@ -242,29 +204,17 @@ export default function VisitModal({
     setPanViejoKg(normalizeNumber(next))
   }
 
-  function updatePayment(id: string, patch: Partial<PaymentDraft>) {
-    setPayments(current =>
-      current.map(payment =>
-        payment.id === id ? { ...payment, ...patch } : payment
-      )
-    )
-  }
-
-  function addPayment() {
-    setPayments(current => [...current, newPaymentDraft()])
-  }
-
-  function removePayment(id: string) {
-    setPayments(current => {
-      if (current.length <= 1) return [newPaymentDraft()]
-      return current.filter(payment => payment.id !== id)
-    })
-  }
-
   async function saveVisit() {
     if (!session || !runId || !customerId(customer)) return
 
+    const paid = numberFromInput(montoPagado)
     const panViejo = numberFromInput(panViejoKg)
+
+    if (!Number.isFinite(paid) || paid < 0) {
+      setError("Ingresá un monto pagado válido.")
+      return
+    }
+
 
     if (!Number.isFinite(panViejo) || panViejo < 0) {
       setError("Ingresá una cantidad válida de pan viejo.")
@@ -287,20 +237,6 @@ export default function VisitModal({
       }
     }
 
-    for (const payment of payments) {
-      const amount = numberFromInput(payment.amount)
-
-      if (!Number.isFinite(amount) || amount < 0) {
-        setError("Ingresá montos de pago válidos.")
-        return
-      }
-    }
-
-    if (pagoExcedido) {
-      setError(`El pago supera el total a cobrar. Total a cobrar: ${money(totalACobrar)}. Total pagado: ${money(totalPagado)}.`)
-      return
-    }
-
     const items = safeStock
       .map(item => {
         const id = productId(item)
@@ -315,18 +251,6 @@ export default function VisitModal({
       })
       .filter(item => item.product_id && Number.isFinite(item.cantidad) && item.cantidad > 0)
 
-    const paymentRows = payments
-      .map(payment => {
-        const amount = numberFromInput(payment.amount)
-
-        return {
-          metodo: payment.metodo,
-          amount,
-          referencia: payment.referencia?.trim() || undefined
-        }
-      })
-      .filter(payment => Number.isFinite(payment.amount) && payment.amount > 0)
-
     setSaving(true)
     setError(null)
 
@@ -336,8 +260,8 @@ export default function VisitModal({
         `/api/repartidor/mi-reparto/${encodeURIComponent(runId)}/clientes/${encodeURIComponent(customerId(customer))}/visita`,
         {
           items,
-          payments: paymentRows,
-          monto_pagado: totalPagado,
+          metodo,
+          monto_pagado: paid,
           total_venta: computedTotal,
           pan_viejo_kg: panViejo,
           observaciones: observaciones.trim() || undefined,
@@ -357,18 +281,18 @@ export default function VisitModal({
 
   return (
     <div className="fixed inset-0 z-50">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/40" onClick={saving ? undefined : onClose} />
 
-      <div className="absolute inset-0 grid place-items-center p-3">
-        <div className="flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-2xl">
-          <div className="flex items-start justify-between gap-4 border-b border-zinc-100 px-5 py-4">
-            <div>
-              <div className="text-xl font-semibold text-zinc-900">
+      <div className="absolute inset-0 sm:grid sm:place-items-center sm:p-3">
+        <div className="flex h-full w-full flex-col overflow-hidden bg-white shadow-2xl sm:max-h-[94vh] sm:max-w-5xl sm:rounded-3xl sm:border sm:border-zinc-200">
+          <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-zinc-100 bg-white px-4 py-4 sm:px-5">
+            <div className="min-w-0">
+              <div className="truncate text-xl font-semibold text-zinc-900">
                 {customer?.nombre || "Cliente"}
               </div>
 
               {customer?.direccion ? (
-                <div className="mt-1 text-sm text-zinc-500">
+                <div className="mt-1 truncate text-sm text-zinc-500">
                   {customer.direccion}
                 </div>
               ) : null}
@@ -382,15 +306,16 @@ export default function VisitModal({
 
             <button
               type="button"
-              className="rounded-xl p-2 hover:bg-zinc-100"
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl border border-zinc-200 hover:bg-zinc-100"
               onClick={onClose}
               disabled={saving}
+              aria-label="Cerrar"
             >
               <X className="h-5 w-5" />
             </button>
           </div>
 
-          <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+          <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4 pb-28 sm:px-5 sm:pb-4">
             <div className="rounded-2xl border border-zinc-200">
               <div className="border-b border-zinc-100 px-4 py-3">
                 <div className="text-base font-semibold text-zinc-900">Mercadería dejada</div>
@@ -413,7 +338,7 @@ export default function VisitModal({
                     const puedeRestar = Number.isFinite(cantidadNumerica) && cantidadNumerica > 0
 
                     return (
-                      <div key={id} className="grid grid-cols-[1fr_auto] gap-3 px-4 py-4">
+                      <div key={id} className="grid gap-3 px-4 py-4 sm:grid-cols-[1fr_auto]">
                         <div className="min-w-0">
                           <div className="text-lg font-semibold text-zinc-900">{productName(item)}</div>
                           <div className="mt-1 text-xs text-zinc-500">
@@ -421,31 +346,32 @@ export default function VisitModal({
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="grid grid-cols-[56px_1fr_56px] items-center gap-2 sm:flex">
                           <button
                             type="button"
                             disabled={saving || !puedeRestar}
                             onClick={() => changeProductQuantity(item, -step)}
-                            className="grid h-12 w-12 place-items-center rounded-2xl border border-zinc-200 bg-white text-zinc-900 shadow-sm hover:bg-zinc-50 disabled:opacity-40"
+                            className="grid h-14 w-14 place-items-center rounded-2xl border border-zinc-200 bg-white text-zinc-900 shadow-sm hover:bg-zinc-50 disabled:opacity-40"
                           >
                             <Minus className="h-5 w-5" />
                           </button>
 
                           <Input
                             type="number"
+                            inputMode="decimal"
                             step="any"
                             min="0"
                             max={restante}
                             value={cantidad}
                             onChange={e => setProductQuantity(item, e.target.value)}
-                            className="h-12 w-24 text-center text-lg font-semibold"
+                            className="h-14 text-center text-xl font-semibold sm:w-24"
                           />
 
                           <button
                             type="button"
                             disabled={saving || !puedeSumar}
                             onClick={() => changeProductQuantity(item, step)}
-                            className="grid h-12 w-12 place-items-center rounded-2xl bg-zinc-900 text-white shadow-sm hover:bg-zinc-800 disabled:opacity-40"
+                            className="grid h-14 w-14 place-items-center rounded-2xl bg-zinc-900 text-white shadow-sm hover:bg-zinc-800 disabled:opacity-40"
                           >
                             <Plus className="h-5 w-5" />
                           </button>
@@ -462,30 +388,31 @@ export default function VisitModal({
                 <div className="text-base font-semibold text-zinc-900">Pan viejo</div>
                 <div className="text-xs text-zinc-500">Pan que el comercio devuelve.</div>
 
-                <div className="mt-4 flex items-center gap-2">
+                <div className="mt-4 grid grid-cols-[56px_1fr_56px] items-center gap-2">
                   <button
                     type="button"
                     disabled={saving || numberFromInput(panViejoKg) <= 0}
                     onClick={() => changePanViejo(-0.5)}
-                    className="grid h-12 w-12 place-items-center rounded-2xl border border-zinc-200 bg-white text-zinc-900 shadow-sm hover:bg-zinc-50 disabled:opacity-40"
+                    className="grid h-14 w-14 place-items-center rounded-2xl border border-zinc-200 bg-white text-zinc-900 shadow-sm hover:bg-zinc-50 disabled:opacity-40"
                   >
                     <Minus className="h-5 w-5" />
                   </button>
 
                   <Input
                     type="number"
+                    inputMode="decimal"
                     step="any"
                     min="0"
                     value={panViejoKg}
                     onChange={e => setPanViejoKg(normalizeNumber(Math.max(numberFromInput(e.target.value), 0)))}
-                    className="h-12 text-center text-lg font-semibold"
+                    className="h-14 text-center text-xl font-semibold"
                   />
 
                   <button
                     type="button"
                     disabled={saving}
                     onClick={() => changePanViejo(0.5)}
-                    className="grid h-12 w-12 place-items-center rounded-2xl bg-zinc-900 text-white shadow-sm hover:bg-zinc-800 disabled:opacity-40"
+                    className="grid h-14 w-14 place-items-center rounded-2xl bg-zinc-900 text-white shadow-sm hover:bg-zinc-800 disabled:opacity-40"
                   >
                     <Plus className="h-5 w-5" />
                   </button>
@@ -496,100 +423,60 @@ export default function VisitModal({
 
               <div className="rounded-2xl border border-zinc-200 p-4">
                 <div className="text-base font-semibold text-zinc-900">Cobro</div>
-                <div className="text-xs text-zinc-500">Se suma deuda anterior, venta actual y pagos recibidos.</div>
+                <div className="text-xs text-zinc-500">El total se calcula por mercadería y precios.</div>
 
-                <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-2xl bg-zinc-50 px-4 py-3">
-                    <div className="text-xs text-zinc-500">Deuda anterior</div>
-                    <div className="text-xl font-semibold text-zinc-900">{money(deudaAnterior)}</div>
-                  </div>
+                <div className="mt-4 rounded-2xl bg-zinc-50 px-4 py-3">
+                  <div className="text-xs text-zinc-500">Total venta calculado</div>
+                  <div className="text-2xl font-semibold text-zinc-900">{money(computedTotal)}</div>
 
-                  <div className="rounded-2xl bg-zinc-50 px-4 py-3">
-                    <div className="text-xs text-zinc-500">Venta actual</div>
-                    <div className="text-xl font-semibold text-zinc-900">{money(computedTotal)}</div>
-                  </div>
-
-                  <div className="rounded-2xl bg-zinc-50 px-4 py-3">
-                    <div className="text-xs text-zinc-500">Total a cobrar</div>
-                    <div className="text-xl font-semibold text-zinc-900">{money(totalACobrar)}</div>
-                  </div>
-                </div>
-
-                {hasDeliveredQuantity && hasMissingPrices ? (
-                  <div className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                    Hay productos sin precio. El total puede quedar en $0 hasta cargar precios.
-                  </div>
-                ) : null}
-
-                <div className="mt-4 space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <div className="text-sm font-semibold text-zinc-900">Pagos recibidos</div>
-                      <div className="text-xs text-zinc-500">Puede cargar más de un método.</div>
+                  {hasDeliveredQuantity && hasMissingPrices ? (
+                    <div className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      Hay productos sin precio. El total puede quedar en $0 hasta cargar precios.
                     </div>
-
-                    <Button type="button" variant="secondary" onClick={addPayment} disabled={saving}>
-                      <Plus className="mr-2 h-4 w-4" />
-                      Agregar pago
-                    </Button>
-                  </div>
-
-                  <div className="space-y-2">
-                    {payments.map(payment => (
-                      <div key={payment.id} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-                        <Select
-                          value={payment.metodo}
-                          onChange={e => updatePayment(payment.id, { metodo: e.target.value })}
-                          className="h-12"
-                        >
-                          <option value="efectivo">Efectivo</option>
-                          <option value="transferencia">Transferencia</option>
-                          <option value="mercado_pago">Mercado Pago</option>
-                          <option value="qr">QR</option>
-                          <option value="otro">Otro</option>
-                        </Select>
-
-                        <Input
-                          type="number"
-                          step="any"
-                          min="0"
-                          value={payment.amount}
-                          onChange={e => updatePayment(payment.id, { amount: e.target.value })}
-                          placeholder="Monto"
-                          className="h-12 text-lg font-semibold"
-                        />
-
-                        <button
-                          type="button"
-                          onClick={() => removePayment(payment.id)}
-                          disabled={saving}
-                          className="grid h-12 w-12 place-items-center rounded-2xl border border-zinc-200 bg-white text-red-600 hover:bg-red-50 disabled:opacity-40"
-                          aria-label="Quitar pago"
-                        >
-                          <Trash2 className="h-5 w-5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
+                  ) : null}
                 </div>
 
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-2xl bg-zinc-50 px-4 py-3">
-                    <div className="text-xs text-zinc-500">Total pagado</div>
-                    <div className="text-2xl font-semibold text-zinc-900">{money(totalPagado)}</div>
-                  </div>
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-zinc-600">Pagó</span>
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      step="any"
+                      min="0"
+                      max={computedTotal}
+                      value={montoPagado}
+                      onChange={e => setMontoPagado(e.target.value)}
+                      placeholder="0"
+                      className="h-14 text-xl font-semibold"
+                    />
+                  </label>
 
-                  <div className="rounded-2xl bg-zinc-50 px-4 py-3">
-                    <div className="text-xs text-zinc-500">Saldo pendiente</div>
-                    <div className="text-2xl font-semibold text-zinc-900">{money(saldoPendiente)}</div>
-                  </div>
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-zinc-600">Método</span>
+                    <Select value={metodo} onChange={e => setMetodo(e.target.value)} className="h-14 text-base">
+                      <option value="efectivo">Efectivo</option>
+                      <option value="transferencia">Transferencia</option>
+                      <option value="mercado_pago">Mercado Pago</option>
+                      <option value="qr">QR</option>
+                      <option value="otro">Otro</option>
+                    </Select>
+                  </label>
                 </div>
 
-                {pagoExcedido ? (
-                  <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                    El pago supera el total a cobrar. Revisá los montos cargados.
-                  </div>
-                ) : null}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button type="button" variant="secondary" onClick={() => setMontoPagado(String(computedTotal))}>
+                    Pagó todo
+                  </Button>
+                  <Button type="button" variant="secondary" onClick={() => setMontoPagado("0")}>
+                    Sin pago
+                  </Button>
+                </div>
+
+                <div className="mt-4 rounded-2xl bg-zinc-50 px-4 py-3">
+                  <div className="text-xs text-zinc-500">Queda debiendo</div>
+                  <div className="text-2xl font-semibold text-zinc-900">{money(deuda)}</div>
+                </div>
               </div>
             </div>
 
@@ -606,7 +493,7 @@ export default function VisitModal({
                 <textarea
                   value={observaciones}
                   onChange={e => setObservaciones(e.target.value)}
-                  className="mt-2 min-h-[90px] w-full rounded-xl border border-zinc-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-300"
+                  className="mt-2 min-h-[100px] w-full rounded-xl border border-zinc-200 px-3 py-2 text-base focus:outline-none focus:ring-2 focus:ring-zinc-300"
                   placeholder="Comentario opcional..."
                 />
               ) : null}
@@ -619,15 +506,17 @@ export default function VisitModal({
             ) : null}
           </div>
 
-          <div className="flex justify-end gap-2 border-t border-zinc-100 px-5 py-4">
-            <Button type="button" variant="secondary" onClick={onClose} disabled={saving}>
-              Cancelar
-            </Button>
+          <div className="fixed inset-x-0 bottom-0 z-20 border-t border-zinc-100 bg-white px-4 pb-[max(env(safe-area-inset-bottom),1rem)] pt-3 sm:static sm:flex sm:justify-end sm:gap-2 sm:px-5 sm:py-4">
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
+              <Button type="button" variant="secondary" onClick={onClose} disabled={saving} className="h-12 sm:w-auto">
+                Cancelar
+              </Button>
 
-            <Button type="button" onClick={saveVisit} disabled={saving || pagoExcedido}>
-              <Save className="mr-2 h-4 w-4" />
-              {saving ? "Guardando..." : "Guardar visita"}
-            </Button>
+              <Button type="button" onClick={saveVisit} disabled={saving} className="h-12 sm:w-auto">
+                <Save className="mr-2 h-4 w-4" />
+                {saving ? "Guardando..." : "Guardar"}
+              </Button>
+            </div>
           </div>
         </div>
       </div>

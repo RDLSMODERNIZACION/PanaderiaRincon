@@ -5,9 +5,7 @@ import Image from "next/image"
 import { usePathname } from "next/navigation"
 import {
   BarChart3,
-  Car,
   Coffee,
-  Flame,
   Home,
   Route,
   Shield,
@@ -38,13 +36,6 @@ const navGroups = [
       { href: "/cuentas", label: "Cuentas", icon: WalletCards, perms: ["admin.menu"] },
       { href: "/clientes", label: "Clientes", icon: Users, perms: ["admin.menu"] },
       { href: "/productos", label: "Productos", icon: Coffee, perms: ["admin.menu"] }
-    ]
-  },
-  {
-    title: "Maquinaria",
-    items: [
-      { href: "/vehiculos", label: "Vehículos", icon: Car, perms: ["admin.menu"] },
-      { href: "/hornos", label: "Hornos", icon: Flame, perms: ["admin.menu"] }
     ]
   },
   {
@@ -103,10 +94,7 @@ export default function Sidebar() {
 
             <div className="space-y-1">
               {group.items.map(item => {
-                const active =
-                  pathname === item.href ||
-                  (item.href !== "/" && pathname?.startsWith(item.href))
-
+                const active = pathname === item.href || (item.href !== "/" && pathname?.startsWith(item.href))
                 const Icon = item.icon
 
                 return (
@@ -132,7 +120,7 @@ export default function Sidebar() {
         <div className="text-xs font-semibold text-zinc-700">Control clave</div>
         <ul className="mt-2 space-y-2 text-xs text-zinc-600">
           <li>• Cada visita queda registrada.</li>
-          <li>• Pagos pendientes se separan de confirmados.</li>
+          <li>• Pagos y deuda se controlan por cliente.</li>
           <li>• Pan viejo/pan rallado se controla en kg.</li>
         </ul>
       </div>

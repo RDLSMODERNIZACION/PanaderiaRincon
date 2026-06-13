@@ -1,10 +1,9 @@
 "use client"
 
-import { useEffect } from "react"
-import { useRouter } from "next/navigation"
 import { useAuth } from "@/features/auth/AuthProvider"
 import Sidebar from "@/components/layout/Sidebar"
 import Topbar from "@/components/layout/Topbar"
+import MobileBottomNav from "@/components/layout/MobileBottomNav"
 import PendingRoleView from "@/features/auth/PendingRoleView"
 import { LoadingBlock } from "@/components/data/AsyncState"
 
@@ -16,24 +15,11 @@ function isConsultaUser(user: any) {
   if (roleId === "role_consulta") return true
   if (roleName === "consulta") return true
 
-  return (
-    permissions.length === 0 &&
-    !user?.isApiKey &&
-    !user?.is_api_key &&
-    !user?.isDevelopmentOpen &&
-    !user?.is_development_open
-  )
+  return permissions.length === 0 && !user?.isApiKey && !user?.is_api_key && !user?.isDevelopmentOpen && !user?.is_development_open
 }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const router = useRouter()
-  const { session, user, loading } = useAuth()
-
-  useEffect(() => {
-    if (!loading && (!session || !user)) {
-      router.replace("/login")
-    }
-  }, [loading, session, user, router])
+  const { user, loading } = useAuth()
 
   if (loading) {
     return (
@@ -43,11 +29,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     )
   }
 
-  if (!session || !user) {
-    return null
-  }
-
-  if (isConsultaUser(user)) {
+  if (user && isConsultaUser(user)) {
     return <PendingRoleView />
   }
 
@@ -59,11 +41,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="min-w-0 flex-1">
           <Topbar />
 
-          <main className="px-4 py-5 md:px-6 lg:px-8">
+          <main className="px-3 py-3 pb-28 md:px-6 md:py-5 md:pb-5 lg:px-8">
             {children}
           </main>
         </div>
       </div>
+
+      <MobileBottomNav />
     </div>
   )
 }
