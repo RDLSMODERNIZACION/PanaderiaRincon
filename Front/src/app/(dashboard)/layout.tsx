@@ -17,7 +17,13 @@ function isConsultaUser(user: any) {
   if (roleId === "role_consulta") return true
   if (roleName === "consulta") return true
 
-  return permissions.length === 0 && !user?.isApiKey && !user?.is_api_key && !user?.isDevelopmentOpen && !user?.is_development_open
+  return (
+    permissions.length === 0 &&
+    !user?.isApiKey &&
+    !user?.is_api_key &&
+    !user?.isDevelopmentOpen &&
+    !user?.is_development_open
+  )
 }
 
 function loginUrl(pathname: string | null) {
