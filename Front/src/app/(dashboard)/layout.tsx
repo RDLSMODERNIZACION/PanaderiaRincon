@@ -3,6 +3,7 @@
 import { useEffect } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { useAuth } from "@/features/auth/AuthProvider"
+import { defaultHomeForUser, isAdminUser } from "@/features/auth/roleUtils"
 import Sidebar from "@/components/layout/Sidebar"
 import Topbar from "@/components/layout/Topbar"
 import MobileBottomNav from "@/components/layout/MobileBottomNav"
@@ -33,6 +34,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   useEffect(() => {
     if (!loading && (!session || !user)) {
       router.replace(loginUrl(pathname))
+      return
+    }
+
+    if (!loading && session && user && pathname === "/" && !isAdminUser(user)) {
+      router.replace(defaultHomeForUser(user))
     }
   }, [loading, session, user, pathname, router])
 
@@ -56,6 +62,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return <PendingRoleView />
   }
 
+  if (pathname === "/" && !isAdminUser(user)) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-zinc-50 p-4">
+        <LoadingBlock label="Redirigiendo al inicio…" />
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-zinc-50">
       <div className="flex">
@@ -64,7 +78,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="min-w-0 flex-1">
           <Topbar />
 
-          <main className="px-3 py-3 pb-[calc(7rem+env(safe-area-inset-bottom))] md:px-6 md:py-5 md:pb-5 lg:px-8">
+          <main className="px-3 py-3 pb-28 md:px-6 md:py-5 md:pb-5 lg:px-8">
             {children}
           </main>
         </div>

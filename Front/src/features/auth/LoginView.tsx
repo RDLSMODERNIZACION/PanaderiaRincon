@@ -9,14 +9,20 @@ import Input from "@/components/ui/Input"
 import { Card, CardBody } from "@/components/ui/Card"
 import { LoadingBlock } from "@/components/data/AsyncState"
 import { getDefaultApiBaseUrl, useAuth } from "@/features/auth/AuthProvider"
+import { defaultHomeForUser } from "@/features/auth/roleUtils"
 
 type AuthMode = "login" | "register"
 
 function safeNextPath(value: string | null) {
-  if (!value) return "/"
-  if (!value.startsWith("/") || value.startsWith("//")) return "/"
-  if (value.startsWith("/login")) return "/"
+  if (!value) return ""
+  if (!value.startsWith("/") || value.startsWith("//")) return ""
+  if (value.startsWith("/login")) return ""
   return value
+}
+
+function destinationForUser(user: any, next: string) {
+  if (next && next !== "/") return next
+  return defaultHomeForUser(user)
 }
 
 export default function LoginView() {
@@ -37,7 +43,7 @@ export default function LoginView() {
 
   useEffect(() => {
     if (!authLoading && session && user) {
-      router.replace(next)
+      router.replace(destinationForUser(user, next))
     }
   }, [authLoading, session, user, next, router])
 
@@ -75,13 +81,13 @@ export default function LoginView() {
         })
       }
 
-      await login({
+      const loggedUser = await login({
         apiBaseUrl,
         username: cleanUsername,
         password
       })
 
-      router.replace(next)
+      router.replace(destinationForUser(loggedUser, next))
     } catch (exc: any) {
       setError(exc?.message || (isRegister ? "No se pudo registrar el usuario" : "No se pudo iniciar sesión"))
     } finally {

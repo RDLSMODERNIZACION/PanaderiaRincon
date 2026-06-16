@@ -43,7 +43,7 @@ type AuthContextType = {
   user: AuthUser | null
   loading: boolean
   error: string | null
-  login: (input: LoginInput) => Promise<void>
+  login: (input: LoginInput) => Promise<AuthUser>
   registerUser: (input: RegisterInput) => Promise<void>
   logout: () => void
   refreshMe: () => Promise<void>
@@ -309,6 +309,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(meData)
       setError(null)
       saveStoredSession(newSession)
+      return meData
     } catch (exc: any) {
       setSession(null)
       setUser(null)

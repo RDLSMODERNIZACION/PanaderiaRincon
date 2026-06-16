@@ -12,15 +12,30 @@ import {
   Truck,
   Users,
   WalletCards
+, type LucideIcon
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/features/auth/AuthProvider"
+import { isAdminUser } from "@/features/auth/roleUtils"
 
-const navGroups = [
+type NavItem = {
+  href: string
+  label: string
+  icon: LucideIcon
+  perms: string[]
+  adminOnly?: boolean
+}
+
+type NavGroup = {
+  title: string
+  items: NavItem[]
+}
+
+const navGroups: NavGroup[] = [
   {
     title: "",
     items: [
-      { href: "/", label: "Dashboard", icon: Home, perms: ["admin.menu"] }
+      { href: "/", label: "Dashboard", icon: Home, perms: ["admin.menu"], adminOnly: true }
     ]
   },
   {
@@ -54,12 +69,15 @@ const navGroups = [
 
 export default function Sidebar() {
   const pathname = usePathname()
-  const { can } = useAuth()
+  const { can, user } = useAuth()
 
   const groups = navGroups
     .map(group => ({
       ...group,
-      items: group.items.filter(item => item.perms.length === 0 || can(...item.perms))
+      items: group.items.filter(item => {
+        if (item.adminOnly && !isAdminUser(user)) return false
+        return item.perms.length === 0 || can(...item.perms)
+      })
     }))
     .filter(group => group.items.length > 0)
 
