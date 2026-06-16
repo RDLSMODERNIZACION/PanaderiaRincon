@@ -18,6 +18,8 @@ export const DEFAULT_API_URL =
   process.env.NEXT_PUBLIC_API_URL ||
   "https://panaderia-backend-vrfl.onrender.com"
 
+const REQUEST_TIMEOUT_MS = Number(process.env.NEXT_PUBLIC_API_TIMEOUT_MS || 15000)
+
 export class ApiError extends Error {
   status: number
   payload?: unknown
@@ -31,7 +33,7 @@ export class ApiError extends Error {
 }
 
 export function normalizeApiUrl(value: string) {
-  return value.trim().replace(/\/$/, "")
+  return value.trim().replace(/\/+$/, "")
 }
 
 function baseUrl(session: ApiSession) {
@@ -63,43 +65,56 @@ export function buildQuery(params: Record<string, unknown>) {
 
 async function request<T = any>(session: ApiSession, path: string, init: RequestInit = {}): Promise<T> {
   const body = init.body
+  const controller = new AbortController()
+  const timeout = globalThis.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
 
-  const res = await fetch(`${baseUrl(session)}${path}`, {
-    ...init,
-    headers: {
-      ...headersFor(session, body !== undefined),
-      ...(init.headers || {})
-    },
-    cache: "no-store"
-  })
+  try {
+    const res = await fetch(`${baseUrl(session)}${path}`, {
+      ...init,
+      headers: {
+        ...headersFor(session, body !== undefined),
+        ...(init.headers || {})
+      },
+      signal: controller.signal,
+      cache: "no-store"
+    })
 
-  const text = await res.text()
-  let payload: any = null
+    const text = await res.text()
+    let payload: any = null
 
-  if (text) {
-    try {
-      payload = JSON.parse(text)
-    } catch {
-      payload = text
+    if (text) {
+      try {
+        payload = JSON.parse(text)
+      } catch {
+        payload = text
+      }
     }
+
+    if (!res.ok) {
+      const msg =
+        payload?.detail ||
+        payload?.error ||
+        payload?.message ||
+        (typeof payload === "string" ? payload : "") ||
+        `Error HTTP ${res.status}`
+
+      throw new ApiError(String(msg), res.status, payload)
+    }
+
+    if (payload?.ok === false) {
+      throw new ApiError(String(payload.error || payload.detail || "Error del backend"), res.status, payload)
+    }
+
+    return payload as T
+  } catch (exc: any) {
+    if (exc?.name === "AbortError") {
+      throw new ApiError("No hubo respuesta del servidor. Revisá la conexión o reintentá en unos segundos.", 408)
+    }
+
+    throw exc
+  } finally {
+    globalThis.clearTimeout(timeout)
   }
-
-  if (!res.ok) {
-    const msg =
-      payload?.detail ||
-      payload?.error ||
-      payload?.message ||
-      (typeof payload === "string" ? payload : "") ||
-      `Error HTTP ${res.status}`
-
-    throw new ApiError(String(msg), res.status, payload)
-  }
-
-  if (payload?.ok === false) {
-    throw new ApiError(String(payload.error || payload.detail || "Error del backend"), res.status, payload)
-  }
-
-  return payload as T
 }
 
 export function apiGet<T = any>(session: ApiSession, path: string) {

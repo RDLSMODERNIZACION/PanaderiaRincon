@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Activity, AlertTriangle, Database, DollarSign, Package, Route, ShoppingCart, Wheat } from "lucide-react"
 import Badge from "@/components/ui/Badge"
 import Button from "@/components/ui/Button"
@@ -15,12 +15,23 @@ type DashboardData = Record<string, any>
 type ExtraData = {
   health?: any
   db?: any
-  dashboard?: DashboardData
+  dashboard?: DashboardData | null
   deudas?: any[]
   pan?: any[]
+  warnings?: string[]
 }
 
-function KpiCard({ title, value, subtitle, icon: Icon }: { title: string; value: React.ReactNode; subtitle?: string; icon: any }) {
+function KpiCard({
+  title,
+  value,
+  subtitle,
+  icon: Icon
+}: {
+  title: string
+  value: React.ReactNode
+  subtitle?: string
+  icon: any
+}) {
   return (
     <Card>
       <CardBody>
@@ -30,11 +41,22 @@ function KpiCard({ title, value, subtitle, icon: Icon }: { title: string; value:
             <div className="mt-2 text-2xl font-semibold tracking-tight">{value}</div>
             {subtitle ? <div className="mt-1 text-xs text-zinc-500">{subtitle}</div> : null}
           </div>
-          <div className="grid h-10 w-10 place-items-center rounded-2xl bg-zinc-100 text-zinc-700"><Icon className="h-5 w-5" /></div>
+          <div className="grid h-10 w-10 place-items-center rounded-2xl bg-zinc-100 text-zinc-700">
+            <Icon className="h-5 w-5" />
+          </div>
         </div>
       </CardBody>
     </Card>
   )
+}
+
+function resultValue<T>(result: PromiseSettledResult<T>, fallback: T) {
+  return result.status === "fulfilled" ? result.value : fallback
+}
+
+function resultWarning(label: string, result: PromiseSettledResult<any>) {
+  if (result.status === "fulfilled") return null
+  return `${label}: ${result.reason?.message || "sin respuesta"}`
 }
 
 export default function DashboardView() {
@@ -44,9 +66,15 @@ export default function DashboardView() {
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
-    if (!session) return
+    if (!session) {
+      setLoading(false)
+      setData({})
+      return
+    }
+
     setLoading(true)
     setError(null)
+
     try {
       const [health, db, dashboard, deudas, pan] = await Promise.allSettled([
         apiGet(session, "/health"),
@@ -56,12 +84,21 @@ export default function DashboardView() {
         apiGet(session, "/api/reparto/reportes/pan-rallado-pendiente")
       ])
 
+      const warnings = [
+        resultWarning("API", health),
+        resultWarning("Base de datos", db),
+        resultWarning("Resumen", dashboard),
+        resultWarning("Deuda clientes", deudas),
+        resultWarning("Pan rallado", pan)
+      ].filter(Boolean) as string[]
+
       setData({
-        health: health.status === "fulfilled" ? health.value : null,
-        db: db.status === "fulfilled" ? db.value : null,
-        dashboard: dashboard.status === "fulfilled" ? unwrapData(dashboard.value) : null,
-        deudas: deudas.status === "fulfilled" ? unwrapData<any[]>(deudas.value) : [],
-        pan: pan.status === "fulfilled" ? unwrapData<any[]>(pan.value) : []
+        health: resultValue(health, null),
+        db: resultValue(db, null),
+        dashboard: dashboard.status === "fulfilled" ? unwrapData<DashboardData>(dashboard.value) : null,
+        deudas: deudas.status === "fulfilled" ? unwrapData<any[]>(deudas.value) || [] : [],
+        pan: pan.status === "fulfilled" ? unwrapData<any[]>(pan.value) || [] : [],
+        warnings
       })
     } catch (exc: any) {
       setError(exc?.message || "No se pudo cargar el dashboard")
@@ -70,39 +107,76 @@ export default function DashboardView() {
     }
   }, [session])
 
-  useEffect(() => { load() }, [load])
-
-  if (loading) return <LoadingBlock label="Cargando panel desde Supabase…" />
-  if (error) return <ErrorBlock error={error} onRetry={load} />
+  useEffect(() => {
+    load()
+  }, [load])
 
   const dash = data.dashboard || {}
   const ventas = dash.ventas || {}
   const produccion = dash.produccion || {}
   const inventario = dash.inventario || {}
   const energia = dash.energia || {}
-  const top = dash.topProductos || dash.top_productos || []
-  const deudaTotal = (data.deudas || []).reduce((acc, row) => acc + Number(row.saldoPesos || row.saldo_pesos || 0), 0)
-  const panPendiente = (data.pan || []).reduce((acc, row) => acc + Number(row.kgPendientes || row.kg_pendientes || 0), 0)
+  const top = useMemo(() => dash.topProductos || dash.top_productos || [], [dash.topProductos, dash.top_productos])
+
+  const deudaTotal = useMemo(() => {
+    return (data.deudas || []).reduce((acc, row) => acc + Number(row.saldoPesos || row.saldo_pesos || 0), 0)
+  }, [data.deudas])
+
+  const panPendiente = useMemo(() => {
+    return (data.pan || []).reduce((acc, row) => acc + Number(row.kgPendientes || row.kg_pendientes || 0), 0)
+  }, [data.pan])
+
+  if (loading) return <LoadingBlock label="Cargando dashboard…" />
+  if (error) return <ErrorBlock error={error} onRetry={load} />
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Dashboard</h1>
-          <p className="mt-1 text-sm text-zinc-600">Resumen real tomado del backend. Si no hay datos, los valores quedan en cero.</p>
+          <p className="mt-1 text-sm text-zinc-600">
+            Resumen del sistema. Si algún módulo no responde, el panel sigue cargando el resto.
+          </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Badge variant={data.db?.ok ? "success" : "danger"}>{data.db?.ok ? "DB conectada" : "DB sin conexión"}</Badge>
-          <Badge variant="muted">{user?.roleName || "Desarrollo"}</Badge>
+          <Badge variant="muted">{user?.roleName || user?.role_name || "Usuario"}</Badge>
           <Button variant="secondary" onClick={load}>Actualizar</Button>
         </div>
       </div>
 
+      {data.warnings && data.warnings.length > 0 ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          <div className="font-semibold">Algunos datos no respondieron.</div>
+          <div className="mt-1 text-xs">Podés seguir usando el sistema. Reintentá con Actualizar.</div>
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard title="Ventas 30 días" value={formatCurrencyARS(ventas.ventasTotal || ventas.ventas_total || 0)} subtitle={`${formatNumber(ventas.tickets || 0)} tickets`} icon={ShoppingCart} />
-        <KpiCard title="Deuda clientes" value={formatCurrencyARS(deudaTotal)} subtitle={`${formatNumber((data.deudas || []).length)} clientes con saldo`} icon={DollarSign} />
-        <KpiCard title="Pan rallado pendiente" value={`${formatNumber(panPendiente, 3)} kg`} subtitle="Saldo neto por comercios" icon={Wheat} />
-        <KpiCard title="Stock valorizado" value={formatCurrencyARS(inventario.valorStock || inventario.valor_stock || 0)} subtitle={`${formatNumber(inventario.insumosBajoStock || inventario.insumos_bajo_stock || 0)} insumos bajo mínimo`} icon={Package} />
+        <KpiCard
+          title="Ventas 30 días"
+          value={formatCurrencyARS(ventas.ventasTotal || ventas.ventas_total || 0)}
+          subtitle={`${formatNumber(ventas.tickets || 0)} tickets`}
+          icon={ShoppingCart}
+        />
+        <KpiCard
+          title="Deuda clientes"
+          value={formatCurrencyARS(deudaTotal)}
+          subtitle={`${formatNumber((data.deudas || []).length)} clientes con saldo`}
+          icon={DollarSign}
+        />
+        <KpiCard
+          title="Pan rallado pendiente"
+          value={`${formatNumber(panPendiente, 3)} kg`}
+          subtitle="Saldo neto por comercios"
+          icon={Wheat}
+        />
+        <KpiCard
+          title="Stock valorizado"
+          value={formatCurrencyARS(inventario.valorStock || inventario.valor_stock || 0)}
+          subtitle={`${formatNumber(inventario.insumosBajoStock || inventario.insumos_bajo_stock || 0)} insumos bajo mínimo`}
+          icon={Package}
+        />
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
@@ -124,7 +198,7 @@ export default function DashboardView() {
         </Card>
 
         <Card>
-          <CardHeader title="Estado técnico" subtitle="Backend / Supabase" />
+          <CardHeader title="Estado técnico" subtitle="Backend / base de datos" />
           <CardBody className="space-y-3 text-sm">
             <div className="flex items-center gap-2"><Activity className="h-4 w-4" /> API: <span className="font-semibold">{data.health?.ok ? "online" : "sin respuesta"}</span></div>
             <div className="flex items-center gap-2"><Database className="h-4 w-4" /> DB: <span className="font-semibold">{data.db?.database || "—"}</span></div>
@@ -138,7 +212,9 @@ export default function DashboardView() {
           <CardHeader title="Top productos" subtitle="Según tickets cargados" />
           <CardBody>
             {top.length === 0 ? (
-              <div className="flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"><AlertTriangle className="mt-0.5 h-4 w-4" /> Todavía no hay ventas cargadas.</div>
+              <div className="flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                <AlertTriangle className="mt-0.5 h-4 w-4" /> Todavía no hay ventas cargadas.
+              </div>
             ) : (
               <div className="space-y-2">
                 {top.map((row: any) => (

@@ -96,6 +96,22 @@ function normalizeUser(data: AuthUser): AuthUser {
   }
 }
 
+
+function isDevelopmentUser(data: AuthUser | null | undefined) {
+  if (!data) return false
+
+  const roleName = String(data.roleName || data.role_name || "").toLowerCase()
+  const roleId = String(data.roleId || data.role_id || "").toLowerCase()
+
+  return (
+    Boolean(data.isDevelopmentOpen || data.is_development_open) ||
+    roleName === "desarrollo" ||
+    roleName === "development" ||
+    roleId === "development" ||
+    roleId === "role_development"
+  )
+}
+
 function sessionFromUser(apiBaseUrl: string, data: AuthUser | any): ApiSession {
   const userId = getUserId(data)
 
@@ -202,6 +218,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const payload = await apiGet(current, "/api/seguridad/me")
       const data = normalizeUser(unwrapData<AuthUser>(payload))
 
+      if (isDevelopmentUser(data)) {
+        throw new Error("La sesión guardada no corresponde a un usuario real. Volvé a iniciar sesión.")
+      }
+
       setSession(current)
       setUser(data)
       setError(null)
@@ -225,6 +245,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (saved?.apiBaseUrl && saved?.userId) {
           const payload = await apiGet(saved, "/api/seguridad/me")
           const data = normalizeUser(unwrapData<AuthUser>(payload))
+
+          if (isDevelopmentUser(data)) {
+            throw new Error("Sesión de desarrollo inválida en producción.")
+          }
 
           if (!mounted) return
 
@@ -276,6 +300,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const mePayload = await apiGet(newSession, "/api/seguridad/me")
       const meData = normalizeUser(unwrapData<AuthUser>(mePayload))
+
+      if (isDevelopmentUser(meData)) {
+        throw new Error("El backend respondió en modo desarrollo. Iniciá sesión con un usuario real.")
+      }
 
       setSession(newSession)
       setUser(meData)
@@ -331,8 +359,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const p = user.permissions || []
 
+      if (isDevelopmentUser(user)) return false
       if (p.includes("*")) return true
-      if (user.isDevelopmentOpen || user.is_development_open) return true
       if (permissions.length === 0) return true
 
       return permissions.some((permission) => p.includes(permission))

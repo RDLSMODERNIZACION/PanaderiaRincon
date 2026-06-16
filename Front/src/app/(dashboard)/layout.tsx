@@ -1,5 +1,7 @@
 "use client"
 
+import { useEffect } from "react"
+import { usePathname, useRouter } from "next/navigation"
 import { useAuth } from "@/features/auth/AuthProvider"
 import Sidebar from "@/components/layout/Sidebar"
 import Topbar from "@/components/layout/Topbar"
@@ -18,18 +20,39 @@ function isConsultaUser(user: any) {
   return permissions.length === 0 && !user?.isApiKey && !user?.is_api_key && !user?.isDevelopmentOpen && !user?.is_development_open
 }
 
+function loginUrl(pathname: string | null) {
+  const next = pathname && pathname !== "/login" ? pathname : "/"
+  return `/login?next=${encodeURIComponent(next)}`
+}
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth()
+  const router = useRouter()
+  const pathname = usePathname()
+  const { session, user, loading } = useAuth()
+
+  useEffect(() => {
+    if (!loading && (!session || !user)) {
+      router.replace(loginUrl(pathname))
+    }
+  }, [loading, session, user, pathname, router])
 
   if (loading) {
     return (
-      <div className="grid min-h-screen place-items-center bg-zinc-50">
-        <LoadingBlock />
+      <div className="grid min-h-screen place-items-center bg-zinc-50 p-4">
+        <LoadingBlock label="Verificando sesión…" />
       </div>
     )
   }
 
-  if (user && isConsultaUser(user)) {
+  if (!session || !user) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-zinc-50 p-4">
+        <LoadingBlock label="Redirigiendo al login…" />
+      </div>
+    )
+  }
+
+  if (isConsultaUser(user)) {
     return <PendingRoleView />
   }
 
