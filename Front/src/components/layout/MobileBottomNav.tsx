@@ -16,7 +16,9 @@ const nav = [
 
 export default function MobileBottomNav() {
   const pathname = usePathname()
-  const { can } = useAuth()
+  const { can, session, user } = useAuth()
+
+  if (!session || !user) return null
 
   const visible = nav.filter(item => item.perms.length === 0 || can(...item.perms)).slice(0, 5)
 

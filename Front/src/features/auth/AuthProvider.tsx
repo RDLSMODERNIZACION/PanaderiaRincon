@@ -105,8 +105,81 @@ function sessionFromUser(apiBaseUrl: string, data: AuthUser | any): ApiSession {
 
   return {
     apiBaseUrl,
+    apiUrl: apiBaseUrl,
     userId
   }
+}
+
+function safeGetStoredValue(storage: Storage | undefined) {
+  try {
+    return storage?.getItem(STORAGE_KEY) || null
+  } catch {
+    return null
+  }
+}
+
+function readStoredSession(): ApiSession | null {
+  if (typeof window === "undefined") return null
+
+  const rawValues = [
+    safeGetStoredValue(window.localStorage),
+    safeGetStoredValue(window.sessionStorage)
+  ].filter(Boolean)
+
+  for (const raw of rawValues) {
+    try {
+      const saved = JSON.parse(String(raw)) as ApiSession & { user_id?: string; id?: string }
+      const apiBaseUrl = normalizeApiBaseUrl(saved.apiBaseUrl || saved.apiUrl)
+      const userId = saved.userId || saved.user_id || saved.id
+
+      if (apiBaseUrl && userId) {
+        return {
+          apiBaseUrl,
+          apiUrl: apiBaseUrl,
+          userId
+        }
+      }
+    } catch {
+      // Si una clave vieja quedó corrupta, se limpia abajo.
+    }
+  }
+
+  return null
+}
+
+function saveStoredSession(session: ApiSession) {
+  if (typeof window === "undefined") return
+
+  const apiBaseUrl = normalizeApiBaseUrl(session.apiBaseUrl || session.apiUrl)
+  const value = JSON.stringify({
+    apiBaseUrl,
+    apiUrl: apiBaseUrl,
+    userId: session.userId
+  })
+
+  try {
+    window.localStorage.setItem(STORAGE_KEY, value)
+  } catch {
+    // El estado en memoria sigue activo aunque el navegador no permita persistir la sesión.
+  }
+
+  try {
+    window.sessionStorage.setItem(STORAGE_KEY, value)
+  } catch {
+    // El estado en memoria sigue activo aunque el navegador no permita persistir la sesión.
+  }
+}
+
+function clearStoredSession() {
+  if (typeof window === "undefined") return
+
+  try {
+    window.localStorage.removeItem(STORAGE_KEY)
+  } catch {}
+
+  try {
+    window.sessionStorage.removeItem(STORAGE_KEY)
+  } catch {}
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -116,46 +189,70 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null)
 
   const refreshMe = useCallback(async () => {
-    const raw = typeof window !== "undefined" ? window.localStorage.getItem(STORAGE_KEY) : null
-    const current = session || (raw ? (JSON.parse(raw) as ApiSession) : null)
+    const current = session || readStoredSession()
 
-    if (!current?.apiBaseUrl || !current?.userId) return
+    if (!current?.apiBaseUrl || !current?.userId) {
+      setSession(null)
+      setUser(null)
+      clearStoredSession()
+      return
+    }
 
-    const payload = await apiGet(current, "/api/seguridad/me")
-    const data = normalizeUser(unwrapData<AuthUser>(payload))
+    try {
+      const payload = await apiGet(current, "/api/seguridad/me")
+      const data = normalizeUser(unwrapData<AuthUser>(payload))
 
-    setSession(current)
-    setUser(data)
-    setError(null)
-
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(current))
+      setSession(current)
+      setUser(data)
+      setError(null)
+      saveStoredSession(current)
+    } catch (exc: any) {
+      setSession(null)
+      setUser(null)
+      setError(exc?.message || "La sesión venció. Volvé a iniciar sesión.")
+      clearStoredSession()
+      throw exc
     }
   }, [session])
 
   useEffect(() => {
+    let mounted = true
+
     async function boot() {
       try {
-        const raw = window.localStorage.getItem(STORAGE_KEY)
+        const saved = readStoredSession()
 
-        if (raw) {
-          const saved = JSON.parse(raw) as ApiSession
+        if (saved?.apiBaseUrl && saved?.userId) {
+          const payload = await apiGet(saved, "/api/seguridad/me")
+          const data = normalizeUser(unwrapData<AuthUser>(payload))
 
-          if (saved?.apiBaseUrl && saved?.userId) {
-            const payload = await apiGet(saved, "/api/seguridad/me")
-            setSession(saved)
-            setUser(normalizeUser(unwrapData<AuthUser>(payload)))
-          }
+          if (!mounted) return
+
+          setSession(saved)
+          setUser(data)
+          setError(null)
+          saveStoredSession(saved)
+        } else {
+          clearStoredSession()
         }
       } catch (exc) {
         console.warn(exc)
-        window.localStorage.removeItem(STORAGE_KEY)
+        clearStoredSession()
+
+        if (mounted) {
+          setSession(null)
+          setUser(null)
+        }
       } finally {
-        setLoading(false)
+        if (mounted) setLoading(false)
       }
     }
 
     boot()
+
+    return () => {
+      mounted = false
+    }
   }, [])
 
   const login = useCallback(async (input: LoginInput) => {
@@ -183,9 +280,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(newSession)
       setUser(meData)
       setError(null)
-
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(newSession))
+      saveStoredSession(newSession)
     } catch (exc: any) {
+      setSession(null)
+      setUser(null)
+      clearStoredSession()
       setError(exc?.message || "No se pudo iniciar sesión")
       throw exc
     } finally {
@@ -223,18 +322,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSession(null)
     setUser(null)
     setError(null)
-
-    if (typeof window !== "undefined") {
-      window.localStorage.removeItem(STORAGE_KEY)
-    }
+    clearStoredSession()
   }, [])
 
   const can = useCallback(
     (...permissions: string[]) => {
-      const p = user?.permissions || []
+      if (!user) return false
+
+      const p = user.permissions || []
 
       if (p.includes("*")) return true
-      if (user?.isDevelopmentOpen || user?.is_development_open) return true
+      if (user.isDevelopmentOpen || user.is_development_open) return true
       if (permissions.length === 0) return true
 
       return permissions.some((permission) => p.includes(permission))

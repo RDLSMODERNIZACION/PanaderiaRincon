@@ -2,6 +2,7 @@
 
 import { LogOut, Menu, RefreshCw } from "lucide-react"
 import { useState } from "react"
+import { usePathname, useRouter } from "next/navigation"
 import SidebarMobile from "./SidebarMobile"
 import Button from "@/components/ui/Button"
 import Badge from "@/components/ui/Badge"
@@ -9,7 +10,15 @@ import { useAuth } from "@/features/auth/AuthProvider"
 
 export default function Topbar() {
   const [open, setOpen] = useState(false)
+  const router = useRouter()
+  const pathname = usePathname()
   const { user, session, logout, refreshMe } = useAuth()
+
+  function handleLogout() {
+    logout()
+    const next = pathname && pathname !== "/login" ? pathname : "/"
+    router.replace(`/login?next=${encodeURIComponent(next)}`)
+  }
 
   return (
     <header className="sticky top-0 z-30 border-b border-zinc-200 bg-white/90 backdrop-blur">
@@ -38,7 +47,7 @@ export default function Topbar() {
             <RefreshCw className="h-4 w-4" />
           </Button>
 
-          <Button variant="secondary" size="sm" onClick={logout} className="h-10 px-3">
+          <Button variant="secondary" size="sm" onClick={handleLogout} className="h-10 px-3">
             <LogOut className="h-4 w-4 md:mr-2" />
             <span className="hidden md:inline">Salir</span>
           </Button>

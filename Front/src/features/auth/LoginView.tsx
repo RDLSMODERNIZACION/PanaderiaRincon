@@ -2,20 +2,28 @@
 
 import Image from "next/image"
 import { useRouter, useSearchParams } from "next/navigation"
-import { FormEvent, useState } from "react"
+import { FormEvent, useEffect, useMemo, useState } from "react"
 import { Eye, EyeOff, LockKeyhole, LogIn, UserPlus, UserRound } from "lucide-react"
 import Button from "@/components/ui/Button"
 import Input from "@/components/ui/Input"
 import { Card, CardBody } from "@/components/ui/Card"
+import { LoadingBlock } from "@/components/data/AsyncState"
 import { getDefaultApiBaseUrl, useAuth } from "@/features/auth/AuthProvider"
 
 type AuthMode = "login" | "register"
 
+function safeNextPath(value: string | null) {
+  if (!value) return "/"
+  if (!value.startsWith("/") || value.startsWith("//")) return "/"
+  if (value.startsWith("/login")) return "/"
+  return value
+}
+
 export default function LoginView() {
   const router = useRouter()
   const search = useSearchParams()
-  const next = search.get("next") || "/"
-  const { login, registerUser } = useAuth()
+  const next = useMemo(() => safeNextPath(search.get("next")), [search])
+  const { login, registerUser, session, user, loading: authLoading } = useAuth()
 
   const [mode, setMode] = useState<AuthMode>("login")
   const [username, setUsername] = useState("")
@@ -26,6 +34,12 @@ export default function LoginView() {
   const [error, setError] = useState<string | null>(null)
 
   const isRegister = mode === "register"
+
+  useEffect(() => {
+    if (!authLoading && session && user) {
+      router.replace(next)
+    }
+  }, [authLoading, session, user, next, router])
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -73,6 +87,14 @@ export default function LoginView() {
     } finally {
       setLoading(false)
     }
+  }
+
+  if (authLoading) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-zinc-50 px-4 py-10">
+        <LoadingBlock label="Verificando sesión…" />
+      </div>
+    )
   }
 
   return (
@@ -127,13 +149,15 @@ export default function LoginView() {
               <div>
                 <label className="mb-1 block text-xs font-medium text-zinc-600">Usuario</label>
                 <div className="relative">
-                  <UserRound className="absolute left-3 top-2.5 h-4 w-4 text-zinc-400" />
+                  <UserRound className="absolute left-3 top-3 h-4 w-4 text-zinc-400" />
                   <Input
                     value={username}
                     onChange={e => setUsername(e.target.value)}
-                    className="pl-9"
+                    className="h-11 pl-9 text-base md:text-sm"
                     placeholder="usuario"
                     autoComplete="username"
+                    autoCapitalize="none"
+                    spellCheck={false}
                   />
                 </div>
               </div>
@@ -141,18 +165,18 @@ export default function LoginView() {
               <div>
                 <label className="mb-1 block text-xs font-medium text-zinc-600">Contraseña</label>
                 <div className="relative">
-                  <LockKeyhole className="absolute left-3 top-2.5 h-4 w-4 text-zinc-400" />
+                  <LockKeyhole className="absolute left-3 top-3 h-4 w-4 text-zinc-400" />
                   <Input
                     value={password}
                     onChange={e => setPassword(e.target.value)}
-                    className="px-9"
+                    className="h-11 px-9 text-base md:text-sm"
                     type={showPassword ? "text" : "password"}
                     placeholder="contraseña"
                     autoComplete={isRegister ? "new-password" : "current-password"}
                   />
                   <button
                     type="button"
-                    className="absolute right-3 top-2.5 text-zinc-400 hover:text-zinc-700"
+                    className="absolute right-3 top-3 text-zinc-400 hover:text-zinc-700"
                     onClick={() => setShowPassword(value => !value)}
                     aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
                   >
@@ -165,11 +189,11 @@ export default function LoginView() {
                 <div>
                   <label className="mb-1 block text-xs font-medium text-zinc-600">Confirmar contraseña</label>
                   <div className="relative">
-                    <LockKeyhole className="absolute left-3 top-2.5 h-4 w-4 text-zinc-400" />
+                    <LockKeyhole className="absolute left-3 top-3 h-4 w-4 text-zinc-400" />
                     <Input
                       value={confirmPassword}
                       onChange={e => setConfirmPassword(e.target.value)}
-                      className="pl-9"
+                      className="h-11 pl-9 text-base md:text-sm"
                       type={showPassword ? "text" : "password"}
                       placeholder="repetir contraseña"
                       autoComplete="new-password"
@@ -180,7 +204,7 @@ export default function LoginView() {
 
               {error ? <div className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
 
-              <Button className="w-full" type="submit" disabled={loading}>
+              <Button className="h-11 w-full" type="submit" disabled={loading}>
                 {isRegister ? <UserPlus className="mr-2 h-4 w-4" /> : <LogIn className="mr-2 h-4 w-4" />}
                 {loading ? "Procesando..." : isRegister ? "Crear usuario" : "Entrar"}
               </Button>
