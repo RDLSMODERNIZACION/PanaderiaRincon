@@ -7,6 +7,8 @@ import {
   ChevronRight,
   Clock,
   MapPin,
+  MapPinned,
+  Navigation,
   PackageCheck,
   Play,
   RefreshCw,
@@ -46,13 +48,28 @@ type RepartidorCustomer = {
   route_customer_id?: string
   customerId?: string
   customer_id?: string
-  orden?: number
+  orden?: number | string | null
+  order?: number | string | null
+  routeOrder?: number | string | null
+  route_order?: number | string | null
+
   nombre?: string
+  name?: string
   direccion?: string | null
+  address?: string | null
   telefono?: string | null
   observaciones?: string | null
+
+  latitud?: number | string | null
+  longitud?: number | string | null
+  lat?: number | string | null
+  lng?: number | string | null
+
   estadoVisita?: string
   estado_visita?: string
+  estado?: string
+  visitada?: boolean
+  visited?: boolean
   visit?: any
 }
 
@@ -103,6 +120,7 @@ type CustomerFilter = "pendientes" | "todos" | "visitados"
 
 function formatDate(value?: string | null) {
   if (!value) return "-"
+
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     const [year, month, day] = value.split("-")
     return `${day}/${month}/${year}`
@@ -110,7 +128,11 @@ function formatDate(value?: string | null) {
 
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" })
+
+  return d.toLocaleString("es-AR", {
+    dateStyle: "short",
+    timeStyle: "short"
+  })
 }
 
 function stockProductId(item: RepartidorStock) {
@@ -137,8 +159,22 @@ function customerId(customer: RepartidorCustomer) {
   return String(customer.customerId || customer.customer_id || "")
 }
 
+function customerName(customer: RepartidorCustomer) {
+  return String(customer.nombre || customer.name || customerId(customer) || "Cliente")
+}
+
+function customerAddress(customer: RepartidorCustomer) {
+  return String(customer.direccion || customer.address || "").trim()
+}
+
 function customerStatus(customer: RepartidorCustomer) {
-  return String(customer.estadoVisita || customer.estado_visita || "pendiente")
+  return String(customer.estadoVisita || customer.estado_visita || customer.estado || "pendiente").toLowerCase()
+}
+
+function customerOrder(customer: RepartidorCustomer, index = 0) {
+  const value = customer.orden ?? customer.order ?? customer.routeOrder ?? customer.route_order ?? index
+  const n = Number(value)
+  return Number.isFinite(n) ? n : index
 }
 
 function statusClass(status: string) {
@@ -170,8 +206,87 @@ function normalize(text: unknown) {
   return String(text || "").trim().toLowerCase()
 }
 
+function numberOrNull(value: unknown) {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : null
+}
+
+function customerMapPoint(customer: RepartidorCustomer) {
+  const lat = numberOrNull(customer.latitud ?? customer.lat)
+  const lng = numberOrNull(customer.longitud ?? customer.lng)
+
+  if (lat !== null && lng !== null) {
+    return `${lat},${lng}`
+  }
+
+  const address = customerAddress(customer)
+
+  if (!address) return ""
+
+  return `${address}, Rincón de los Sauces, Neuquén, Argentina`
+}
+
+function isCustomerVisited(customer: RepartidorCustomer) {
+  const status = customerStatus(customer)
+
+  return (
+    customer.visitada === true ||
+    customer.visited === true ||
+    status === "visitado" ||
+    status === "cerrada" ||
+    status === "cerrado"
+  )
+}
+
+function sortedRouteCustomers(customers: RepartidorCustomer[]) {
+  return [...customers].sort((a, b) => customerOrder(a) - customerOrder(b))
+}
+
+function routeCustomersForMaps(customers: RepartidorCustomer[], onlyPending = true) {
+  const sorted = sortedRouteCustomers(customers)
+  const pending = sorted.filter(customer => !isCustomerVisited(customer))
+
+  if (onlyPending && pending.length > 0) return pending
+  return sorted
+}
+
+function buildGoogleMapsRouteUrl(customers: RepartidorCustomer[]) {
+  const points = customers.map(customerMapPoint).filter(Boolean)
+
+  if (points.length === 0) return ""
+
+  if (points.length === 1) {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(points[0])}`
+  }
+
+  const destination = encodeURIComponent(points[points.length - 1])
+  const waypoints = points
+    .slice(0, -1)
+    .map(point => encodeURIComponent(point))
+    .join("%7C")
+
+  return [
+    "https://www.google.com/maps/dir/?api=1",
+    "origin=Current%20Location",
+    `destination=${destination}`,
+    waypoints ? `waypoints=${waypoints}` : "",
+    "travelmode=driving"
+  ]
+    .filter(Boolean)
+    .join("&")
+}
+
+function buildAppleMapsNextStopUrl(customers: RepartidorCustomer[]) {
+  const firstPoint = customers.map(customerMapPoint).filter(Boolean)[0]
+
+  if (!firstPoint) return ""
+
+  return `https://maps.apple.com/?daddr=${encodeURIComponent(firstPoint)}&dirflg=d`
+}
+
 export default function MiRepartoView() {
   const { session } = useAuth()
+
   const [data, setData] = useState<MiRepartoData | null>(null)
   const [selectedCustomer, setSelectedCustomer] = useState<RepartidorCustomer | null>(null)
   const [loading, setLoading] = useState(true)
@@ -202,8 +317,20 @@ export default function MiRepartoView() {
   }, [load])
 
   const sortedCustomers = useMemo(() => {
-    return [...(data?.customers || [])].sort((a, b) => Number(a.orden || 0) - Number(b.orden || 0))
+    return sortedRouteCustomers(data?.customers || [])
   }, [data])
+
+  const mapCustomers = useMemo(() => {
+    return routeCustomersForMaps(sortedCustomers, true)
+  }, [sortedCustomers])
+
+  const googleMapsUrl = useMemo(() => {
+    return buildGoogleMapsRouteUrl(mapCustomers)
+  }, [mapCustomers])
+
+  const appleMapsUrl = useMemo(() => {
+    return buildAppleMapsNextStopUrl(mapCustomers)
+  }, [mapCustomers])
 
   const filteredCustomers = useMemo(() => {
     const search = q.trim().toLowerCase()
@@ -217,9 +344,9 @@ export default function MiRepartoView() {
       if (!search) return true
 
       const text = [
-        customer.orden,
-        customer.nombre,
-        customer.direccion,
+        customerOrder(customer),
+        customerName(customer),
+        customerAddress(customer),
         customer.telefono,
         customer.observaciones,
         status
@@ -237,6 +364,16 @@ export default function MiRepartoView() {
 
   const pendingCount = Math.max(sortedCustomers.length - visitedCount, 0)
   const progress = sortedCustomers.length > 0 ? Math.round((visitedCount / sortedCustomers.length) * 100) : 0
+
+  function openGoogleMapsRoute() {
+    if (!googleMapsUrl) return
+    window.open(googleMapsUrl, "_blank", "noopener,noreferrer")
+  }
+
+  function openAppleMapsRoute() {
+    if (!appleMapsUrl) return
+    window.open(appleMapsUrl, "_blank", "noopener,noreferrer")
+  }
 
   async function iniciarReparto() {
     if (!session || !data?.run?.id) return
@@ -258,9 +395,10 @@ export default function MiRepartoView() {
   async function finalizarReparto() {
     if (!session || !data?.run?.id) return
 
-    const text = pendingCount > 0
-      ? `Todavía quedan ${pendingCount} local(es) pendiente(s). ¿Querés finalizar igual?`
-      : "¿Querés finalizar el reparto?"
+    const text =
+      pendingCount > 0
+        ? `Todavía quedan ${pendingCount} local(es) pendiente(s). ¿Querés finalizar igual?`
+        : "¿Querés finalizar el reparto?"
 
     if (!window.confirm(text)) return
 
@@ -299,7 +437,9 @@ export default function MiRepartoView() {
                 <Truck className="h-4 w-4" />
                 Mi reparto
               </div>
+
               <div className="mt-2 truncate text-2xl font-semibold">{routeName}</div>
+
               <div className="mt-1 text-sm text-zinc-300">
                 {formatDate(run.fecha)} · {driverName}
               </div>
@@ -313,8 +453,11 @@ export default function MiRepartoView() {
           <div className="mt-4">
             <div className="flex items-center justify-between text-xs text-zinc-300">
               <span>Avance del recorrido</span>
-              <span>{visitedCount}/{sortedCustomers.length} locales</span>
+              <span>
+                {visitedCount}/{sortedCustomers.length} locales
+              </span>
             </div>
+
             <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/20">
               <div className="h-full rounded-full bg-white" style={{ width: `${progress}%` }} />
             </div>
@@ -348,6 +491,35 @@ export default function MiRepartoView() {
             </div>
           </div>
 
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            <Button
+              type="button"
+              onClick={openGoogleMapsRoute}
+              disabled={!googleMapsUrl}
+              className="h-12 w-full"
+            >
+              <MapPinned className="mr-2 h-5 w-5" />
+              Ver recorrido
+            </Button>
+
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={openAppleMapsRoute}
+              disabled={!appleMapsUrl}
+              className="h-12 w-full"
+            >
+              <Navigation className="mr-2 h-5 w-5" />
+              Apple Maps
+            </Button>
+          </div>
+
+          {!googleMapsUrl ? (
+            <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              Para ver el recorrido, los clientes deben tener dirección o coordenadas cargadas.
+            </div>
+          ) : null}
+
           <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
             <Button variant="secondary" onClick={load} className="h-12 w-full sm:w-auto">
               <RefreshCw className="mr-2 h-4 w-4" />
@@ -362,7 +534,12 @@ export default function MiRepartoView() {
             ) : null}
 
             {isInProgress ? (
-              <Button variant="secondary" onClick={finalizarReparto} disabled={finalizing} className="h-12 w-full sm:w-auto">
+              <Button
+                variant="secondary"
+                onClick={finalizarReparto}
+                disabled={finalizing}
+                className="h-12 w-full sm:w-auto"
+              >
                 <CheckCircle2 className="mr-2 h-4 w-4" />
                 {finalizing ? "Finalizando..." : "Finalizar reparto"}
               </Button>
@@ -376,8 +553,10 @@ export default function MiRepartoView() {
           <CardBody>
             <div className="flex gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
               <XCircle className="mt-0.5 h-5 w-5 text-zinc-500" />
+
               <div>
                 <div className="font-semibold text-zinc-900">Reparto cerrado</div>
+
                 <div className="mt-1 text-sm text-zinc-600">
                   Este reparto ya fue finalizado. No se pueden cargar nuevas visitas.
                 </div>
@@ -389,13 +568,19 @@ export default function MiRepartoView() {
 
       {isPrepared ? (
         <Card>
-          <CardHeader title="Listo para salir" subtitle="Cuando administración termine de cargar mercadería, iniciá el recorrido." />
+          <CardHeader
+            title="Listo para salir"
+            subtitle="Cuando administración termine de cargar mercadería, iniciá el recorrido."
+          />
+
           <CardBody>
             <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
               <div className="flex gap-3">
                 <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+
                 <div>
                   <div className="font-semibold">El reparto todavía está preparado.</div>
+
                   <div className="mt-1">
                     Iniciá el reparto para habilitar la carga de visitas en cada local.
                   </div>
@@ -409,10 +594,15 @@ export default function MiRepartoView() {
       {isInProgress ? (
         <>
           <Card>
-            <CardHeader title="Locales del recorrido" subtitle="Tocá un local para registrar entrega, cobro y pan viejo." />
+            <CardHeader
+              title="Locales del recorrido"
+              subtitle="Tocá un local para registrar entrega, cobro y pan viejo."
+            />
+
             <CardBody className="space-y-3">
               <div className="relative">
                 <Search className="absolute left-3 top-3.5 h-4 w-4 text-zinc-400" />
+
                 <Input
                   value={q}
                   onChange={event => setQ(event.target.value)}
@@ -425,21 +615,35 @@ export default function MiRepartoView() {
                 <button
                   type="button"
                   onClick={() => setFilter("pendientes")}
-                  className={`rounded-2xl px-3 py-2 text-sm font-medium ${filter === "pendientes" ? "bg-zinc-900 text-white" : "border border-zinc-200 bg-white text-zinc-700"}`}
+                  className={`rounded-2xl px-3 py-2 text-sm font-medium ${
+                    filter === "pendientes"
+                      ? "bg-zinc-900 text-white"
+                      : "border border-zinc-200 bg-white text-zinc-700"
+                  }`}
                 >
                   Pendientes
                 </button>
+
                 <button
                   type="button"
                   onClick={() => setFilter("todos")}
-                  className={`rounded-2xl px-3 py-2 text-sm font-medium ${filter === "todos" ? "bg-zinc-900 text-white" : "border border-zinc-200 bg-white text-zinc-700"}`}
+                  className={`rounded-2xl px-3 py-2 text-sm font-medium ${
+                    filter === "todos"
+                      ? "bg-zinc-900 text-white"
+                      : "border border-zinc-200 bg-white text-zinc-700"
+                  }`}
                 >
                   Todos
                 </button>
+
                 <button
                   type="button"
                   onClick={() => setFilter("visitados")}
-                  className={`rounded-2xl px-3 py-2 text-sm font-medium ${filter === "visitados" ? "bg-zinc-900 text-white" : "border border-zinc-200 bg-white text-zinc-700"}`}
+                  className={`rounded-2xl px-3 py-2 text-sm font-medium ${
+                    filter === "visitados"
+                      ? "bg-zinc-900 text-white"
+                      : "border border-zinc-200 bg-white text-zinc-700"
+                  }`}
                 >
                   Visitados
                 </button>
@@ -464,23 +668,24 @@ export default function MiRepartoView() {
                         className="flex w-full items-center gap-3 px-4 py-4 text-left transition hover:bg-zinc-50 sm:px-5"
                       >
                         <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-zinc-100 text-base font-bold text-zinc-700">
-                          {customer.orden || "-"}
+                          {customerOrder(customer) || "-"}
                         </div>
 
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
                             <div className="truncate text-base font-semibold text-zinc-900">
-                              {customer.nombre || customerId(customer)}
+                              {customerName(customer)}
                             </div>
+
                             <span className={`rounded-full px-2 py-1 text-[11px] font-medium ${statusClass(status)}`}>
                               {statusLabel(status)}
                             </span>
                           </div>
 
-                          {customer.direccion ? (
+                          {customerAddress(customer) ? (
                             <div className="mt-1 flex items-center gap-1 text-sm text-zinc-500">
                               <MapPin className="h-3.5 w-3.5 shrink-0" />
-                              <span className="truncate">{customer.direccion}</span>
+                              <span className="truncate">{customerAddress(customer)}</span>
                             </div>
                           ) : null}
 
@@ -500,6 +705,7 @@ export default function MiRepartoView() {
 
           <Card>
             <CardHeader title="Mercadería disponible" subtitle="Control rápido de lo que queda en el reparto." />
+
             <CardBody>
               {data.stock.length === 0 ? (
                 <EmptyBlock label="No hay mercadería asignada." />
@@ -509,11 +715,13 @@ export default function MiRepartoView() {
                     <div key={String(item.id)} className="rounded-2xl border border-zinc-200 p-4">
                       <div className="font-semibold text-zinc-900">{stockName(item)}</div>
                       <div className="mt-1 text-xs text-zinc-500">Unidad: {stockUnit(item) || "-"}</div>
+
                       <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                         <div className="rounded-xl bg-zinc-50 p-3">
                           <div className="text-xs text-zinc-500">Cargado</div>
                           <div className="text-lg font-semibold text-zinc-900">{qty(stockLoaded(item))}</div>
                         </div>
+
                         <div className="rounded-xl bg-zinc-50 p-3">
                           <div className="text-xs text-zinc-500">Restante</div>
                           <div className="text-lg font-semibold text-zinc-900">{qty(stockRemaining(item))}</div>
@@ -528,23 +736,48 @@ export default function MiRepartoView() {
         </>
       ) : null}
 
-      {(isPrepared || isInProgress) ? (
+      {isPrepared || isInProgress ? (
         <div className="fixed inset-x-3 bottom-20 z-30 md:hidden">
           <div className="rounded-3xl border border-zinc-200 bg-white/95 p-2 shadow-2xl backdrop-blur">
             {isPrepared ? (
-              <Button onClick={iniciarReparto} disabled={starting} className="h-14 w-full rounded-2xl text-base">
-                <Play className="mr-2 h-5 w-5" />
-                {starting ? "Iniciando..." : "Iniciar reparto"}
-              </Button>
-            ) : (
               <div className="grid grid-cols-2 gap-2">
-                <Button variant="secondary" onClick={load} className="h-12 rounded-2xl">
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                  Actualizar
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={openGoogleMapsRoute}
+                  disabled={!googleMapsUrl}
+                  className="h-14 rounded-2xl text-base"
+                >
+                  <MapPinned className="mr-2 h-5 w-5" />
+                  Recorrido
                 </Button>
+
+                <Button onClick={iniciarReparto} disabled={starting} className="h-14 rounded-2xl text-base">
+                  <Play className="mr-2 h-5 w-5" />
+                  {starting ? "Iniciando..." : "Iniciar"}
+                </Button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={openGoogleMapsRoute}
+                  disabled={!googleMapsUrl}
+                  className="h-12 rounded-2xl"
+                >
+                  <MapPinned className="mr-1 h-4 w-4" />
+                  Ruta
+                </Button>
+
+                <Button variant="secondary" onClick={load} className="h-12 rounded-2xl">
+                  <RefreshCw className="mr-1 h-4 w-4" />
+                  Act.
+                </Button>
+
                 <Button variant="secondary" onClick={finalizarReparto} disabled={finalizing} className="h-12 rounded-2xl">
-                  <CheckCircle2 className="mr-2 h-4 w-4" />
-                  Finalizar
+                  <CheckCircle2 className="mr-1 h-4 w-4" />
+                  Fin
                 </Button>
               </div>
             )}
