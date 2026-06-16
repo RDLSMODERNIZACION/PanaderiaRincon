@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils"
 
 export function Table({ children }: { children: React.ReactNode }) {
   return (
-    <div className="overflow-x-auto">
+    <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
       <table className="min-w-full border-separate border-spacing-0">{children}</table>
     </div>
   )
@@ -29,7 +29,7 @@ export function TR({ children, className, onClick }: { children: React.ReactNode
   return (
     <tr
       className={cn(
-        "border-b border-zinc-100 hover:bg-zinc-50/70 transition-colors",
+        "border-b border-zinc-100 transition-colors hover:bg-zinc-50/70",
         onClick ? "cursor-pointer" : "",
         className
       )}

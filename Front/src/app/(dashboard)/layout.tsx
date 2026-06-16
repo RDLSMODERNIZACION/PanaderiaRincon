@@ -17,13 +17,7 @@ function isConsultaUser(user: any) {
   if (roleId === "role_consulta") return true
   if (roleName === "consulta") return true
 
-  return (
-    permissions.length === 0 &&
-    !user?.isApiKey &&
-    !user?.is_api_key &&
-    !user?.isDevelopmentOpen &&
-    !user?.is_development_open
-  )
+  return permissions.length === 0 && !user?.isApiKey && !user?.is_api_key && !user?.isDevelopmentOpen && !user?.is_development_open
 }
 
 function loginUrl(pathname: string | null) {
@@ -70,7 +64,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="min-w-0 flex-1">
           <Topbar />
 
-          <main className="px-3 py-3 pb-28 md:px-6 md:py-5 md:pb-5 lg:px-8">
+          <main className="px-3 py-3 pb-[calc(7rem+env(safe-area-inset-bottom))] md:px-6 md:py-5 md:pb-5 lg:px-8">
             {children}
           </main>
         </div>

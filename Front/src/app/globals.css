@@ -13,3 +13,27 @@ html, body {
 body{
   @apply bg-zinc-50 text-zinc-900;
 }
+
+@media (max-width: 767px) {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    overscroll-behavior-y: none;
+  }
+
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  table {
+    white-space: nowrap;
+  }
+}

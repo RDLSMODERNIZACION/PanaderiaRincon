@@ -6,16 +6,16 @@ export function Card({ className, children }: { className?: string; children: Re
 
 export function CardHeader({ title, subtitle, right }: { title: string; subtitle?: string; right?: React.ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-zinc-100 px-5 py-4">
-      <div>
+    <div className="flex flex-col gap-3 border-b border-zinc-100 px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:px-5">
+      <div className="min-w-0">
         <div className="text-sm font-semibold text-zinc-900">{title}</div>
         {subtitle ? <div className="mt-1 text-xs text-zinc-500">{subtitle}</div> : null}
       </div>
-      {right ? <div className="shrink-0">{right}</div> : null}
+      {right ? <div className="w-full sm:w-auto sm:shrink-0">{right}</div> : null}
     </div>
   )
 }
 
 export function CardBody({ className, children }: { className?: string; children: React.ReactNode }) {
-  return <div className={cn("px-5 py-4", className)}>{children}</div>
+  return <div className={cn("px-4 py-4 sm:px-5", className)}>{children}</div>
 }
