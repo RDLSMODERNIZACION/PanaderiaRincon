@@ -254,28 +254,12 @@ function buildGoogleMapsRouteUrl(customers: RepartidorCustomer[]) {
 
   if (points.length === 0) return ""
 
-  if (points.length === 1) {
-    const params = new URLSearchParams()
-    params.set("api", "1")
-    params.set("destination", points[0])
-    params.set("travelmode", "driving")
+  const segments = [
+    "Tu ubicación",
+    ...points
+  ].map(point => encodeURIComponent(point))
 
-    return `https://www.google.com/maps/dir/?${params.toString()}`
-  }
-
-  const destination = points[points.length - 1]
-  const waypoints = points.slice(0, -1)
-
-  const params = new URLSearchParams()
-  params.set("api", "1")
-  params.set("destination", destination)
-  params.set("travelmode", "driving")
-
-  if (waypoints.length > 0) {
-    params.set("waypoints", waypoints.join("|"))
-  }
-
-  return `https://www.google.com/maps/dir/?${params.toString()}`
+  return `https://www.google.com/maps/dir/${segments.join("/")}/?travelmode=driving`
 }
 
 export default function MiRepartoView() {
@@ -363,7 +347,7 @@ export default function MiRepartoView() {
       /Android|iPhone|iPad|iPod/i.test(window.navigator.userAgent)
 
     if (isMobile) {
-      window.location.href = googleMapsUrl
+      window.location.assign(googleMapsUrl)
       return
     }
 
