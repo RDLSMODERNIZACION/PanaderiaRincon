@@ -8,7 +8,6 @@ import {
   Clock,
   MapPin,
   MapPinned,
-  Navigation,
   PackageCheck,
   Play,
   RefreshCw,
@@ -276,14 +275,6 @@ function buildGoogleMapsRouteUrl(customers: RepartidorCustomer[]) {
     .join("&")
 }
 
-function buildAppleMapsNextStopUrl(customers: RepartidorCustomer[]) {
-  const firstPoint = customers.map(customerMapPoint).filter(Boolean)[0]
-
-  if (!firstPoint) return ""
-
-  return `https://maps.apple.com/?daddr=${encodeURIComponent(firstPoint)}&dirflg=d`
-}
-
 export default function MiRepartoView() {
   const { session } = useAuth()
 
@@ -328,10 +319,6 @@ export default function MiRepartoView() {
     return buildGoogleMapsRouteUrl(mapCustomers)
   }, [mapCustomers])
 
-  const appleMapsUrl = useMemo(() => {
-    return buildAppleMapsNextStopUrl(mapCustomers)
-  }, [mapCustomers])
-
   const filteredCustomers = useMemo(() => {
     const search = q.trim().toLowerCase()
 
@@ -368,11 +355,6 @@ export default function MiRepartoView() {
   function openGoogleMapsRoute() {
     if (!googleMapsUrl) return
     window.open(googleMapsUrl, "_blank", "noopener,noreferrer")
-  }
-
-  function openAppleMapsRoute() {
-    if (!appleMapsUrl) return
-    window.open(appleMapsUrl, "_blank", "noopener,noreferrer")
   }
 
   async function iniciarReparto() {
@@ -491,7 +473,7 @@ export default function MiRepartoView() {
             </div>
           </div>
 
-          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          <div className="mt-4 hidden md:block">
             <Button
               type="button"
               onClick={openGoogleMapsRoute}
@@ -501,17 +483,6 @@ export default function MiRepartoView() {
               <MapPinned className="mr-2 h-5 w-5" />
               Ver recorrido
             </Button>
-
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={openAppleMapsRoute}
-              disabled={!appleMapsUrl}
-              className="h-12 w-full"
-            >
-              <Navigation className="mr-2 h-5 w-5" />
-              Apple Maps
-            </Button>
           </div>
 
           {!googleMapsUrl ? (
@@ -520,14 +491,14 @@ export default function MiRepartoView() {
             </div>
           ) : null}
 
-          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
-            <Button variant="secondary" onClick={load} className="h-12 w-full sm:w-auto">
+          <div className="mt-4 hidden flex-col gap-2 md:flex md:flex-row md:justify-end">
+            <Button variant="secondary" onClick={load} className="h-12 w-full md:w-auto">
               <RefreshCw className="mr-2 h-4 w-4" />
               Actualizar
             </Button>
 
             {isPrepared ? (
-              <Button onClick={iniciarReparto} disabled={starting} className="h-12 w-full sm:w-auto">
+              <Button onClick={iniciarReparto} disabled={starting} className="h-12 w-full md:w-auto">
                 <Play className="mr-2 h-4 w-4" />
                 {starting ? "Iniciando..." : "Iniciar reparto"}
               </Button>
@@ -538,7 +509,7 @@ export default function MiRepartoView() {
                 variant="secondary"
                 onClick={finalizarReparto}
                 disabled={finalizing}
-                className="h-12 w-full sm:w-auto"
+                className="h-12 w-full md:w-auto"
               >
                 <CheckCircle2 className="mr-2 h-4 w-4" />
                 {finalizing ? "Finalizando..." : "Finalizar reparto"}
