@@ -386,14 +386,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
+const authFallback: AuthContextType = {
+  session: null,
+  user: null,
+  loading: false,
+  error: null,
+  login: async () => {
+    throw new Error("No se encontró AuthProvider. Recargá la página e iniciá sesión nuevamente.")
+  },
+  registerUser: async () => {
+    throw new Error("No se encontró AuthProvider. Recargá la página e iniciá sesión nuevamente.")
+  },
+  logout: () => {
+    clearStoredSession()
+  },
+  refreshMe: async () => {},
+  can: () => false
+}
+
 export function useAuth() {
   const ctx = useContext(AuthContext)
 
-  if (!ctx) {
-    throw new Error("useAuth debe usarse dentro de AuthProvider")
-  }
-
-  return ctx
+  // En Next.js, la ruta interna /_not-found puede prerenderizarse fuera del árbol normal.
+  // En ese caso no debe romper el build: devolvemos una sesión vacía y las pantallas protegidas redirigen al login.
+  return ctx || authFallback
 }
 
 export function getDefaultApiBaseUrl() {
